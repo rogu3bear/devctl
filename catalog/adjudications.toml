@@ -1,0 +1,18 @@
+# Optional review decisions for noisy or already-reviewed findings.
+#
+# Findings are keyed by stable `fingerprint` values emitted by:
+#
+#   devctl standards audit ~/dev --pilot three-tier
+#
+# Supported statuses:
+#
+# - true-positive
+# - accepted-exception
+# - false-positive
+# - law-needs-work
+#
+# accepted-exception, false-positive, and law-needs-work findings are excluded
+# from repair tranche planning. Audit output still shows them with the attached
+# reason.
+
+adjudications = []

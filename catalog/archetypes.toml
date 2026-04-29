@@ -1,0 +1,42 @@
+schema_version = "0.1.0"
+
+[[archetypes]]
+id = "cloudflare-product"
+title = "Cloudflare-backed product repo"
+requires_canonical_commands = true
+requires_cloudflare_posture = true
+allowed_cloudflare_postures = [
+  "cfctl-native",
+  "cfctl-aware-wrapper",
+  "legacy/raw-wrangler-exception",
+  "none",
+]
+requires_release_evidence = true
+requires_artifact_classification = true
+
+[[archetypes]]
+id = "rust-web-product"
+title = "Rust web product repo"
+requires_canonical_commands = true
+requires_cloudflare_posture = false
+allowed_cloudflare_postures = ["none"]
+requires_release_evidence = true
+requires_artifact_classification = true
+
+[[archetypes]]
+id = "rust-workspace"
+title = "Rust workspace"
+requires_canonical_commands = true
+requires_cloudflare_posture = false
+allowed_cloudflare_postures = ["none"]
+requires_release_evidence = false
+requires_artifact_classification = true
+
+[[archetypes]]
+id = "generic-active-repo"
+title = "Generic active repo"
+requires_canonical_commands = true
+requires_cloudflare_posture = false
+allowed_cloudflare_postures = ["none"]
+requires_release_evidence = false
+requires_artifact_classification = true

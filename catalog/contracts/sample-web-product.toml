@@ -1,0 +1,55 @@
+schema_version = "0.1.0"
+repo = "sample-web-product"
+archetype = "cloudflare-product"
+status = "active-product"
+
+[[canonical_commands]]
+id = "workspace-check"
+command = "cargo check --workspace"
+
+[[canonical_commands]]
+id = "workspace-test"
+command = "cargo test --workspace"
+
+[[canonical_commands]]
+id = "web-test"
+command = "npm test"
+
+[cloudflare]
+posture = "cfctl-aware-wrapper"
+
+[cloudflare.token_policy]
+parent_tokens = ["CF_DEV_TOKEN", "CF_GLOBAL_TOKEN"]
+parent_allowed_paths = ["AGENTS.md", "CLAUDE.md"]
+forbidden_sinks = ["CLOUDFLARE_API_TOKEN"]
+
+[[cloudflare.surfaces]]
+id = "frontend-worker"
+kind = "worker"
+wrangler_config = "cloudflare/frontend-worker/wrangler.jsonc"
+
+[[cloudflare.surfaces]]
+id = "api-worker"
+kind = "worker"
+wrangler_config = "cloudflare/api-worker/wrangler.jsonc"
+
+[[cloudflare.surfaces]]
+id = "ops-worker"
+kind = "worker"
+wrangler_config = "cloudflare/ops-worker/wrangler.jsonc"
+
+[release]
+evidence_dirs = ["var/logs", "artifacts"]
+
+[[release.lanes]]
+id = "workspace"
+command = "npm test"
+preflight = "cargo check --workspace"
+post_verify = "cargo test --workspace"
+evidence = ["var/logs", "artifacts"]
+mutates_cloudflare = true
+
+[artifacts.classifications]
+artifacts = "release-evidence"
+build = "generated-build-output"
+var = "operator-runtime"

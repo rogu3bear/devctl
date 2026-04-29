@@ -1,0 +1,37 @@
+schema_version = "0.1.0"
+
+[[laws]]
+id = "cloudflare-mutation"
+title = "Cloudflare mutation law"
+description = "Cloudflare repos must declare cfctl-native, cfctl-aware-wrapper, or legacy/raw-wrangler-exception; raw Wrangler/API mutation docs are findings unless explicitly excepted."
+maturity = "pilot"
+
+[[laws]]
+id = "token"
+title = "Token law"
+description = "CF_DEV_TOKEN and CF_GLOBAL_TOKEN may only appear in allowlisted control-plane or rotation contexts; parent tokens must not become deploy credentials."
+maturity = "pilot"
+
+[[laws]]
+id = "command-verification"
+title = "Command and verification law"
+description = "Active repos must expose canonical check/verify commands; check-* and verify-* scripts should be classified."
+maturity = "pilot"
+
+[[laws]]
+id = "release-proof"
+title = "Release proof law"
+description = "Deploy/release scripts must have preflight, post-deploy verification, and evidence directory declarations."
+maturity = "pilot"
+
+[[laws]]
+id = "artifact-boundary"
+title = "Artifact boundary law"
+description = "Top-level runtime, generated, evidence, and build output paths must be classified or ignored."
+maturity = "pilot"
+
+[[laws]]
+id = "repo-contract"
+title = "Repo contract law"
+description = "Active repos must resolve to a typed devctl contract whose archetype, posture, commands, release evidence, and artifact classes match observed repo reality."
+maturity = "pilot"

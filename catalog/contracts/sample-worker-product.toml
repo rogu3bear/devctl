@@ -1,0 +1,60 @@
+schema_version = "0.1.0"
+repo = "sample-worker-product"
+archetype = "cloudflare-product"
+status = "active-product"
+
+[[canonical_commands]]
+id = "workspace-check"
+command = "cargo check --workspace"
+
+[[canonical_commands]]
+id = "workspace-test"
+command = "cargo test --workspace"
+
+[[canonical_commands]]
+id = "make-check"
+command = "make check"
+
+[cloudflare]
+posture = "cfctl-aware-wrapper"
+
+[cloudflare.token_policy]
+parent_tokens = ["CF_DEV_TOKEN", "CF_GLOBAL_TOKEN"]
+parent_allowed_paths = ["AGENTS.md", "CLAUDE.md", "scripts/rotate-secrets.sh"]
+forbidden_sinks = ["CLOUDFLARE_API_TOKEN"]
+
+[[cloudflare.surfaces]]
+id = "pages"
+kind = "pages"
+path = "pages"
+
+[[cloudflare.surfaces]]
+id = "workers"
+kind = "worker-dir"
+path = "workers"
+
+[[cloudflare.surfaces]]
+id = "app-worker"
+kind = "worker"
+wrangler_config = "workers/app/wrangler.toml"
+
+[[cloudflare.surfaces]]
+id = "jobs-worker"
+kind = "worker"
+wrangler_config = "workers/jobs/wrangler.toml"
+
+[release]
+evidence_dirs = ["var/logs"]
+
+[[release.lanes]]
+id = "workspace"
+command = "make check"
+preflight = "cargo check --workspace"
+post_verify = "cargo test --workspace"
+evidence = ["var/logs"]
+mutates_cloudflare = true
+
+[artifacts.classifications]
+".deploy" = "release-export"
+output = "generated-output"
+var = "operator-runtime"

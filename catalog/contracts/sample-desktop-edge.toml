@@ -1,0 +1,48 @@
+schema_version = "0.1.0"
+repo = "sample-desktop-edge"
+archetype = "cloudflare-product"
+status = "active-product"
+
+[[canonical_commands]]
+id = "ops-verify"
+command = "./ops/verify.sh"
+
+[cloudflare]
+posture = "legacy/raw-wrangler-exception"
+
+[cloudflare.token_policy]
+parent_tokens = ["CF_DEV_TOKEN", "CF_GLOBAL_TOKEN"]
+parent_allowed_paths = ["AGENTS.md", "CLAUDE.md", "ops"]
+forbidden_sinks = ["CLOUDFLARE_API_TOKEN"]
+
+[[cloudflare.surfaces]]
+id = "functions"
+kind = "functions"
+path = "functions"
+
+[[cloudflare.surfaces]]
+id = "pages-config"
+kind = "pages"
+wrangler_config = "wrangler.toml"
+
+[[cloudflare.raw_exceptions]]
+path = "ops/deploy-pages.sh"
+operation = "pages deploy"
+reason = "legacy Pages deploy lane pending control-plane wrapper migration"
+expires = "2026-06-30"
+
+[release]
+evidence_dirs = ["reports"]
+
+[[release.lanes]]
+id = "ops-verify"
+command = "./ops/verify.sh"
+preflight = "./ops/verify.sh"
+post_verify = "./ops/verify.sh"
+evidence = ["reports"]
+mutates_cloudflare = true
+
+[artifacts.classifications]
+build = "generated-build-output"
+dist = "release-output"
+reports = "release-evidence"

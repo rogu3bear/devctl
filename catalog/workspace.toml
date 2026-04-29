@@ -1,0 +1,24 @@
+schema_version = "0.1.0"
+default_root = "~/dev"
+pilot_three_tier = ["sample-web-product", "sample-worker-product", "sample-desktop-edge"]
+status_values = [
+  "active-product",
+  "active-control-plane",
+  "active-library",
+  "template",
+  "legacy",
+  "experiment",
+]
+
+[repo_status]
+cloudflare = "active-control-plane"
+devctl = "active-control-plane"
+sample-web-product = "active-product"
+sample-worker-product = "active-product"
+sample-desktop-edge = "active-product"
+sample-agent-runtime = "active-product"
+sample-app-platform = "active-product"
+sample-shared-tools = "active-library"
+sample-plugin-kit = "active-library"
+sample-web-template = "template"
+sample-rust-template = "template"
