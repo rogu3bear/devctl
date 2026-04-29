@@ -19,6 +19,7 @@ devctl standards packet ~/dev --pilot three-tier --risk P0,P1
 devctl standards propose-contract ~/dev/sample-desktop-edge
 devctl standards report ~/dev --pilot three-tier
 devctl repo explain ~/dev/sample-desktop-edge
+devctl doctor privacy .
 ```
 
 ## Standards loop
@@ -30,6 +31,9 @@ V0.1 adds the review loop around the original read-only audit:
 - `catalog/contracts/` contains operator-owned repo contracts with typed command,
   Cloudflare, release, token, and artifact records. Target repos are still
   read-only.
+- `catalog/local/` or `DEVCTL_CATALOG_HOME` can provide ignored private operator
+  overlays. Local overlay values replace public pilot lists and override matching
+  repo statuses/contracts without making private repo names public.
 - `catalog/laws.toml` declares the active laws and their maturity.
 - `catalog/adjudications.toml` records explicit review decisions by finding
   fingerprint.
@@ -49,6 +53,20 @@ policy.
 The repo development flow is the center of the system. Contracts and archetypes
 define intent; `devctl` is the read-only instrument panel that observes drift,
 proposes contracts, and packages repair work.
+
+## Privacy Gate
+
+Before publishing public branches, run:
+
+```bash
+devctl doctor privacy .
+```
+
+The privacy doctor scans tracked-style source, docs, catalogs, and generated
+reports while ignoring `.git`, `target`, and `node_modules`. It flags absolute
+home paths and email addresses by default. Set `DEVCTL_PRIVACY_PATTERNS` to a
+comma-separated list of additional regular expressions for local private names
+or domains.
 
 ## Verification
 

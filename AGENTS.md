@@ -6,6 +6,7 @@
 
 - The public interface is the `devctl` CLI.
 - Catalog policy lives under `catalog/`.
+- Private operator catalog overlays live under `catalog/local/` or `DEVCTL_CATALOG_HOME`; keep them ignored.
 - Archetypes and contracts are first-class policy; scanners provide evidence, not the source of intent.
 - Generated standards reports live under `reports/` and remain gitignored.
 - The CLI may inspect sibling repos, but V0 must not edit them.
@@ -27,5 +28,6 @@
 - Add laws through catalog + scanner behavior together.
 - Add archetypes/contracts through catalog + validation behavior together.
 - Keep contract schemas typed and source-cited; validation should reject malformed catalog policy before scanners run.
+- Run `devctl doctor privacy .` before publishing public branches.
 - Record review decisions in `catalog/adjudications.toml`; do not hide findings without a reason.
 - Never print secret values. Key names, file paths, modes, and line numbers are acceptable.
