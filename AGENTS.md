@@ -28,6 +28,8 @@
 - Add laws through catalog + scanner behavior together.
 - Add archetypes/contracts through catalog + validation behavior together.
 - Keep contract schemas typed and source-cited; validation should reject malformed catalog policy before scanners run.
+- Keep planning scope explicit; `standards plan` must not silently return empty work when the selected pilot catalog matches no repos.
 - Run `devctl doctor privacy .` before publishing public branches.
+- Run `devctl doctor catalog <workspace>` when changing catalog loading or planning behavior.
 - Record review decisions in `catalog/adjudications.toml`; do not hide findings without a reason.
 - Never print secret values. Key names, file paths, modes, and line numbers are acceptable.
