@@ -4,6 +4,7 @@ use ignore::WalkBuilder;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
+use std::env;
 use std::error::Error;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
@@ -35,6 +36,26 @@ enum Commands {
     Inventory(InventoryArgs),
     Standards(StandardsArgs),
     Repo(RepoArgs),
+    Doctor(DoctorArgs),
+}
+
+#[derive(Args)]
+struct DoctorArgs {
+    #[command(subcommand)]
+    command: DoctorCommand,
+}
+
+#[derive(Subcommand)]
+enum DoctorCommand {
+    Privacy(PrivacyArgs),
+}
+
+#[derive(Args)]
+struct PrivacyArgs {
+    #[arg(default_value = ".")]
+    root: Utf8PathBuf,
+    #[arg(long)]
+    json: bool,
 }
 
 #[derive(Args)]
@@ -167,7 +188,22 @@ struct ExplainArgs {
 
 #[derive(Debug, Deserialize)]
 struct WorkspaceCatalog {
+    #[serde(default)]
     pilot_three_tier: Vec<String>,
+    #[serde(default)]
+    repo_status: BTreeMap<String, RepoStatus>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct WorkspaceCatalogFile {
+    schema_version: String,
+    #[serde(default)]
+    default_root: Option<String>,
+    #[serde(default)]
+    pilot_three_tier: Vec<String>,
+    #[serde(default)]
+    status_values: Vec<String>,
+    #[serde(default)]
     repo_status: BTreeMap<String, RepoStatus>,
 }
 
@@ -565,6 +601,25 @@ struct ContractsOutput {
 }
 
 #[derive(Debug, Serialize)]
+struct PrivacyOutput {
+    schema_version: &'static str,
+    root: String,
+    scanned_files: usize,
+    findings: Vec<PrivacyFinding>,
+}
+
+#[derive(Debug, Serialize)]
+struct PrivacyFinding {
+    id: String,
+    file: String,
+    line: usize,
+    pattern: String,
+    message: String,
+    evidence: String,
+    recommendation: String,
+}
+
+#[derive(Debug, Serialize)]
 struct ReportOutput {
     schema_version: &'static str,
     tool_version: &'static str,
@@ -757,6 +812,16 @@ pub fn run() -> DevResult<()> {
                     print_json(&repo)?;
                 } else {
                     print_repo_human(&repo);
+                }
+            }
+        },
+        Commands::Doctor(args) => match args.command {
+            DoctorCommand::Privacy(args) => {
+                let output = privacy_doctor_command(&args)?;
+                if args.json {
+                    print_json(&output)?;
+                } else {
+                    print_privacy_human(&output);
                 }
             }
         },
@@ -1038,6 +1103,58 @@ fn report_command(args: &ReportArgs) -> DevResult<ReportOutput> {
     })
 }
 
+fn privacy_doctor_command(args: &PrivacyArgs) -> DevResult<PrivacyOutput> {
+    let root = normalize_path(&args.root);
+    let output_root = privacy_output_root(&args.root, &root);
+    let patterns = privacy_patterns()?;
+    let mut findings = Vec::new();
+    let mut scanned_files = 0;
+    for entry in WalkBuilder::new(&root)
+        .standard_filters(true)
+        .hidden(false)
+        .filter_entry(|entry| !is_ignored_privacy_path(entry.path()))
+        .build()
+    {
+        let entry = entry?;
+        if !entry
+            .file_type()
+            .is_some_and(|file_type| file_type.is_file())
+        {
+            continue;
+        }
+        let path = Utf8PathBuf::from_path_buf(entry.path().to_path_buf())
+            .map_err(|path| format!("non-utf8 privacy scan path: {}", path.display()))?;
+        let Ok(body) = fs::read_to_string(&path) else {
+            continue;
+        };
+        scanned_files += 1;
+        for (index, line) in body.lines().enumerate() {
+            for pattern in &patterns {
+                if let Some(match_) = pattern.regex.find(line) {
+                    findings.push(PrivacyFinding {
+                        id: String::new(),
+                        file: relative_display(&root, &path),
+                        line: index + 1,
+                        pattern: pattern.name.clone(),
+                        message: pattern.message.clone(),
+                        evidence: redact_privacy_evidence(match_.as_str()),
+                        recommendation: pattern.recommendation.clone(),
+                    });
+                }
+            }
+        }
+    }
+    for (index, finding) in findings.iter_mut().enumerate() {
+        finding.id = format!("P{:04}", index + 1);
+    }
+    Ok(PrivacyOutput {
+        schema_version: SCHEMA_VERSION,
+        root: output_root,
+        scanned_files,
+        findings,
+    })
+}
+
 fn parse_risk(value: &str) -> DevResult<Vec<Severity>> {
     value
         .split(',')
@@ -1047,28 +1164,75 @@ fn parse_risk(value: &str) -> DevResult<Vec<Severity>> {
 }
 
 fn load_workspace_catalog() -> DevResult<WorkspaceCatalog> {
-    let path = Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("catalog/workspace.toml");
-    let body = fs::read_to_string(path)?;
-    Ok(toml::from_str(&body)?)
+    load_workspace_catalog_from_roots(&catalog_public_root(), catalog_local_root().as_deref())
+}
+
+fn load_workspace_catalog_from_roots(
+    public_root: &Utf8Path,
+    local_root: Option<&Utf8Path>,
+) -> DevResult<WorkspaceCatalog> {
+    let mut catalog = read_workspace_catalog_file(&public_root.join("workspace.toml"))?;
+    if let Some(local_root) = local_root {
+        let local_path = local_root.join("workspace.toml");
+        if local_path.is_file() {
+            let local = read_workspace_catalog_file(&local_path)?;
+            if !local.pilot_three_tier.is_empty() {
+                catalog.pilot_three_tier = local.pilot_three_tier;
+            }
+            catalog.repo_status.extend(local.repo_status);
+        }
+    }
+    Ok(catalog)
 }
 
 fn load_laws_catalog() -> DevResult<LawsCatalog> {
-    let path = Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("catalog/laws.toml");
+    let path = catalog_public_root().join("laws.toml");
     let body = fs::read_to_string(path)?;
     Ok(toml::from_str(&body)?)
 }
 
 fn load_archetypes_catalog() -> DevResult<ArchetypesCatalog> {
-    let path = Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("catalog/archetypes.toml");
+    let path = catalog_public_root().join("archetypes.toml");
     let body = fs::read_to_string(path)?;
     Ok(toml::from_str(&body)?)
 }
 
 fn load_contracts_catalog() -> DevResult<ContractsCatalog> {
-    let root = Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("catalog/contracts");
+    load_contracts_catalog_from_roots(&catalog_public_root(), catalog_local_root().as_deref())
+}
+
+fn load_contracts_catalog_from_roots(
+    public_root: &Utf8Path,
+    local_root: Option<&Utf8Path>,
+) -> DevResult<ContractsCatalog> {
     let mut catalog = ContractsCatalog::default();
+    load_contracts_from_dir(&public_root.join("contracts"), &mut catalog)?;
+    if let Some(local_root) = local_root {
+        load_contracts_from_dir(&local_root.join("contracts"), &mut catalog)?;
+    }
+    Ok(catalog)
+}
+
+fn read_workspace_catalog_file(path: &Utf8Path) -> DevResult<WorkspaceCatalog> {
+    let body = fs::read_to_string(path)?;
+    let file: WorkspaceCatalogFile = toml::from_str(&body)?;
+    let _ = (&file.default_root, &file.status_values);
+    if file.schema_version != SCHEMA_VERSION {
+        return Err(format!(
+            "{} schema_version {} does not match {SCHEMA_VERSION}",
+            path, file.schema_version
+        )
+        .into());
+    }
+    Ok(WorkspaceCatalog {
+        pilot_three_tier: file.pilot_three_tier,
+        repo_status: file.repo_status,
+    })
+}
+
+fn load_contracts_from_dir(root: &Utf8Path, catalog: &mut ContractsCatalog) -> DevResult<()> {
     if !root.is_dir() {
-        return Ok(catalog);
+        return Ok(());
     }
     for entry in fs::read_dir(root)? {
         let entry = entry?;
@@ -1083,9 +1247,6 @@ fn load_contracts_catalog() -> DevResult<ContractsCatalog> {
         let body = fs::read_to_string(&path)?;
         let lines = toml_line_map(&body);
         let contract: RepoContract = toml::from_str(&body)?;
-        if catalog.contracts.contains_key(&contract.repo) {
-            return Err(format!("duplicate contract for repo {}", contract.repo).into());
-        }
         catalog.contracts.insert(
             contract.repo.clone(),
             SourcedRepoContract {
@@ -1095,16 +1256,28 @@ fn load_contracts_catalog() -> DevResult<ContractsCatalog> {
             },
         );
     }
-    Ok(catalog)
+    Ok(())
 }
 
 fn load_adjudications_catalog() -> DevResult<AdjudicationsCatalog> {
-    let path = Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("catalog/adjudications.toml");
+    let path = catalog_public_root().join("adjudications.toml");
     if !path.is_file() {
         return Ok(AdjudicationsCatalog::default());
     }
     let body = fs::read_to_string(path)?;
     Ok(toml::from_str(&body)?)
+}
+
+fn catalog_public_root() -> Utf8PathBuf {
+    Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("catalog")
+}
+
+fn catalog_local_root() -> Option<Utf8PathBuf> {
+    if let Some(path) = env::var_os("DEVCTL_CATALOG_HOME") {
+        return Utf8PathBuf::from_path_buf(path.into()).ok();
+    }
+    let local = catalog_public_root().join("local");
+    local.is_dir().then_some(local)
 }
 
 fn validate_laws_catalog(catalog: &LawsCatalog) -> DevResult<()> {
@@ -1704,6 +1877,76 @@ fn is_ignored_cloudflare_discovery_path(path: &std::path::Path) -> bool {
             ".git" | "node_modules" | "target" | ".deploy" | "fixtures"
         )
     })
+}
+
+#[derive(Debug)]
+struct PrivacyPattern {
+    name: String,
+    regex: Regex,
+    message: String,
+    recommendation: String,
+}
+
+fn privacy_patterns() -> DevResult<Vec<PrivacyPattern>> {
+    let mut patterns = vec![
+        PrivacyPattern {
+            name: "absolute-home-path".to_string(),
+            regex: Regex::new(concat!(r"(/Us", r"ers|/home)/[A-Za-z0-9._-]+"))?,
+            message: "Absolute user home path is checked into the repository".to_string(),
+            recommendation: "Use ~/dev, <workspace>, or a documented environment variable instead."
+                .to_string(),
+        },
+        PrivacyPattern {
+            name: "email-address".to_string(),
+            regex: Regex::new(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")?,
+            message: "Email address is checked into the repository".to_string(),
+            recommendation: "Replace personal email addresses with neutral examples.".to_string(),
+        },
+    ];
+    if let Ok(raw) = env::var("DEVCTL_PRIVACY_PATTERNS") {
+        for (index, pattern) in raw.split(',').enumerate() {
+            let pattern = pattern.trim();
+            if pattern.is_empty() {
+                continue;
+            }
+            patterns.push(PrivacyPattern {
+                name: format!("operator-pattern-{}", index + 1),
+                regex: Regex::new(pattern)?,
+                message: "Operator-provided private pattern is checked into the repository"
+                    .to_string(),
+                recommendation: "Move this value to an ignored local overlay or neutral example."
+                    .to_string(),
+            });
+        }
+    }
+    Ok(patterns)
+}
+
+fn is_ignored_privacy_path(path: &std::path::Path) -> bool {
+    path.components().any(|component| {
+        let value = component.as_os_str().to_string_lossy();
+        matches!(value.as_ref(), ".git" | "target" | "node_modules")
+    })
+}
+
+fn redact_privacy_evidence(value: &str) -> String {
+    if let Some((prefix, _)) = value.rsplit_once('/') {
+        return format!("{prefix}/<redacted>");
+    }
+    if value.contains('@') {
+        return "<email:redacted>".to_string();
+    }
+    "<redacted>".to_string()
+}
+
+fn privacy_output_root(input: &Utf8Path, _normalized: &Utf8Path) -> String {
+    if input.as_str() == "." {
+        ".".to_string()
+    } else if input.is_relative() {
+        input.to_string()
+    } else {
+        "<absolute-scan-root>".to_string()
+    }
 }
 
 fn scan_release(path: &Utf8Path) -> DevResult<ReleaseInfo> {
@@ -3203,6 +3446,19 @@ fn print_packet_human(output: &PacketOutput) {
     println!("packet_markdown: {}", output.packet_markdown);
 }
 
+fn print_privacy_human(output: &PrivacyOutput) {
+    println!("devctl doctor privacy");
+    println!("root: {}", output.root);
+    println!("scanned_files: {}", output.scanned_files);
+    println!("findings: {}", output.findings.len());
+    for finding in &output.findings {
+        println!(
+            "{} {}:{} {} - {}",
+            finding.id, finding.file, finding.line, finding.pattern, finding.message
+        );
+    }
+}
+
 fn print_contracts_human(output: &ContractsOutput) {
     println!("devctl standards contracts");
     println!("root: {}", output.root);
@@ -3380,6 +3636,98 @@ mod tests {
         let json = serde_json::to_string(&output).expect("json serializes");
         assert!(json.contains("\"schema_version\":\"0.1.0\""));
         assert!(json.contains("\"sample-web-product\""));
+    }
+
+    #[test]
+    fn local_workspace_overlay_replaces_pilot_and_overrides_status() {
+        let fixture = TestWorkspace::new();
+        fixture.write(
+            "public/workspace.toml",
+            r#"schema_version = "0.1.0"
+pilot_three_tier = ["public-repo"]
+
+[repo_status]
+public-repo = "active-product"
+shared-repo = "active-product"
+"#,
+        );
+        fixture.write(
+            "local/workspace.toml",
+            r#"schema_version = "0.1.0"
+pilot_three_tier = ["private-repo"]
+
+[repo_status]
+shared-repo = "legacy"
+"#,
+        );
+
+        let catalog = load_workspace_catalog_from_roots(
+            &fixture.root.join("public"),
+            Some(&fixture.root.join("local")),
+        )
+        .expect("workspace overlay loads");
+
+        assert_eq!(catalog.pilot_three_tier, vec!["private-repo"]);
+        assert_eq!(
+            catalog.repo_status.get("shared-repo"),
+            Some(&RepoStatus::Legacy)
+        );
+        assert_eq!(
+            catalog.repo_status.get("public-repo"),
+            Some(&RepoStatus::ActiveProduct)
+        );
+    }
+
+    #[test]
+    fn local_contract_overlay_overrides_public_contract() {
+        let fixture = TestWorkspace::new();
+        fixture.write(
+            "public/contracts/demo.toml",
+            &contract_fixture("demo", "cargo check --workspace"),
+        );
+        fixture.write(
+            "local/contracts/demo.toml",
+            &contract_fixture("demo", "cargo test --workspace"),
+        );
+
+        let catalog = load_contracts_catalog_from_roots(
+            &fixture.root.join("public"),
+            Some(&fixture.root.join("local")),
+        )
+        .expect("contract overlay loads");
+        let sourced = catalog.contracts.get("demo").expect("demo contract exists");
+
+        assert_eq!(
+            command_contract_texts(&sourced.contract.canonical_commands),
+            vec!["cargo test --workspace"]
+        );
+        assert!(sourced.path.starts_with(fixture.root.join("local")));
+    }
+
+    #[test]
+    fn privacy_doctor_redacts_operator_values_and_uses_relative_files() {
+        let fixture = TestWorkspace::new();
+        let home_path = ["/Us", "ers/private/dev/devctl"].concat();
+        let email = ["hello", "@", "example.com"].concat();
+        fixture.write(
+            "README.md",
+            &format!("operator path {home_path} and email {email}\n"),
+        );
+        fixture.write("target/generated.txt", &format!("{home_path}/ignored\n"));
+
+        let output = privacy_doctor_command(&PrivacyArgs {
+            root: fixture.root.clone(),
+            json: true,
+        })
+        .expect("privacy doctor runs");
+
+        assert_eq!(output.findings.len(), 2);
+        assert!(output.findings.iter().all(|finding| {
+            finding.file == "README.md"
+                && !finding.evidence.contains("private")
+                && !finding.evidence.contains(&email)
+        }));
+        assert!(!output.root.contains("private"));
     }
 
     #[test]
@@ -3833,6 +4181,15 @@ mod tests {
             }
         }
 
+        fn write(&self, relative: &str, body: &str) {
+            let path = self.root.join(relative);
+            if let Some(parent) = path.parent() {
+                fs::create_dir_all(parent).expect("parent created");
+            }
+            let mut file = fs::File::create(path).expect("file created");
+            file.write_all(body.as_bytes()).expect("fixture written");
+        }
+
         fn repo(&self, name: &str) -> TestRepo {
             let repo = TestRepo {
                 root: self.root.join(name),
@@ -3895,6 +4252,23 @@ mod tests {
             release: ReleaseInfo::default(),
             artifacts: ArtifactInfo::default(),
         }
+    }
+
+    fn contract_fixture(repo: &str, command: &str) -> String {
+        format!(
+            r#"schema_version = "{SCHEMA_VERSION}"
+repo = "{repo}"
+archetype = "rust-workspace"
+status = "active-product"
+canonical_commands = ["{command}"]
+
+[cloudflare]
+posture = "none"
+
+[release]
+evidence_dirs = []
+"#
+        )
     }
 
     fn test_archetypes() -> ArchetypesCatalog {
