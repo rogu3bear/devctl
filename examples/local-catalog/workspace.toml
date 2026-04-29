@@ -1,0 +1,20 @@
+schema_version = "0.1.0"
+default_root = "~/dev"
+pilot_three_tier = [
+  "product-web",
+  "worker-product",
+  "desktop-edge",
+]
+status_values = [
+  "active-product",
+  "active-control-plane",
+  "active-library",
+  "template",
+  "legacy",
+  "experiment",
+]
+
+[repo_status]
+product-web = "active-product"
+worker-product = "active-product"
+desktop-edge = "active-product"

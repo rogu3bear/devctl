@@ -1,0 +1,42 @@
+schema_version = "0.1.0"
+repo = "product-web"
+archetype = "cloudflare-product"
+status = "active-product"
+
+[[canonical_commands]]
+id = "check"
+command = "cargo check --workspace"
+required = true
+
+[[canonical_commands]]
+id = "test"
+command = "cargo test --workspace"
+required = true
+
+[cloudflare]
+posture = "cfctl-aware-wrapper"
+
+[[cloudflare.surfaces]]
+id = "worker"
+kind = "worker"
+wrangler_config = "workers/app/wrangler.toml"
+required = true
+
+[cloudflare.token_policy]
+parent_tokens = []
+parent_allowed_paths = []
+forbidden_sinks = ["CLOUDFLARE_API_TOKEN"]
+
+[release]
+evidence_dirs = ["reports"]
+
+[[release.lanes]]
+id = "deploy"
+command = "scripts/deploy.sh"
+preflight = "cargo test --workspace"
+post_verify = "scripts/verify-prod.sh"
+evidence = ["reports"]
+mutates_cloudflare = true
+
+[artifacts.classifications]
+reports = "generated evidence; ignored"

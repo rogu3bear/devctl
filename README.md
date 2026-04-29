@@ -33,6 +33,12 @@ data. Real operator workspace truth belongs in ignored private overlays under
 |-- AGENTS.md                 # rules for agents changing this repo
 |-- README.md                 # operator and contributor orientation
 |-- Cargo.toml                # Rust CLI crate
+|-- docs/
+|   `-- OPERATIONS.md         # weekly standards loop runbook
+|-- examples/
+|   `-- local-catalog/        # safe private-overlay templates
+|-- scripts/
+|   `-- standards-loop.sh     # repeatable local standards lane
 |-- src/
 |   |-- main.rs               # thin binary entrypoint
 |   `-- lib.rs                # CLI, scanners, catalogs, reports, tests
@@ -74,6 +80,14 @@ devctl standards plan ~/dev --all --risk P0,P1
 
 If `standards plan ~/dev --risk P0,P1` returns a zero-repo pilot warning, load a
 private catalog overlay or use `--all` intentionally.
+
+For the repeatable local lane, run:
+
+```bash
+./scripts/standards-loop.sh ~/dev
+```
+
+See `docs/OPERATIONS.md` for the triage loop.
 
 ## Command Guide
 
@@ -124,7 +138,8 @@ The catalog is the source of intent:
 Private overlays can replace pilot lists and override matching repo statuses or
 contracts without committing private repo names to the public repo.
 
-See `catalog/README.md` for the editing model.
+See `catalog/README.md` for the editing model and `examples/local-catalog/` for
+safe templates.
 
 ## Output Rules
 

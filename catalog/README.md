@@ -88,3 +88,7 @@ Overlay behavior:
 
 Use `devctl doctor catalog <workspace>` to confirm that the expected overlay is
 loaded before trusting pilot plans.
+
+Neutral templates live under `examples/local-catalog/`. Copy them into
+`catalog/local/` or an external private catalog directory, then replace the
+sample repo names with local workspace truth in the ignored copy.
