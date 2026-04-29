@@ -1,3 +1,10 @@
+//! Read-only standards control-plane CLI for a local repo forest.
+//!
+//! `devctl` keeps operator intent in typed catalogs, gathers file:line evidence
+//! from target repos, and turns findings into report-first repair plans. V0 is
+//! deliberately read-only: commands may inspect sibling repos, but they do not
+//! mutate them.
+
 use camino::{Utf8Path, Utf8PathBuf};
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use ignore::WalkBuilder;

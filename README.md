@@ -1,82 +1,139 @@
 # devctl
 
-Read-only standards control plane for the local `~/dev` repo forest.
+`devctl` is a read-only standards control plane for a local repo forest.
 
-`devctl` inventories repos, audits a small set of high-value engineering laws,
-and groups findings into repair tranches. V0 is report-only: it does not edit
-target repos.
+It answers three questions:
 
-## Commands
+- What repos exist here, and what shape are they?
+- Which engineering standards are drifting?
+- What PR-sized repair tranches should happen next?
+
+V0 is intentionally report-first. It inventories, audits, explains, proposes,
+and plans. It does not edit target repos.
+
+## Mental Model
+
+`devctl` has three layers:
+
+- **Catalogs define intent.** Laws, archetypes, contracts, and adjudications live
+  under `catalog/`.
+- **Scanners gather evidence.** The CLI walks repos, records file:line evidence,
+  and never prints secret values.
+- **Reports shape action.** Plans, packets, reports, and contract proposals group
+  findings into reviewable work.
+
+The public repo carries reusable standards machinery and neutral sample catalog
+data. Real operator workspace truth belongs in ignored private overlays under
+`catalog/local/` or an external `DEVCTL_CATALOG_HOME`.
+
+## Repo Map
+
+```text
+.
+|-- AGENTS.md                 # rules for agents changing this repo
+|-- README.md                 # operator and contributor orientation
+|-- Cargo.toml                # Rust CLI crate
+|-- src/
+|   |-- main.rs               # thin binary entrypoint
+|   `-- lib.rs                # CLI, scanners, catalogs, reports, tests
+`-- catalog/
+    |-- README.md             # catalog model and editing guide
+    |-- workspace.toml        # public sample workspace catalog
+    |-- laws.toml             # standard definitions and maturity
+    |-- archetypes.toml       # repo shapes and required capabilities
+    |-- adjudications.toml    # reviewed finding decisions
+    `-- contracts/            # public sample repo contracts
+```
+
+Generated reports live under `reports/` and build outputs live under `target/`.
+Both are ignored.
+
+## First Run
+
+Use the doctor commands before trusting plans:
+
+```bash
+devctl doctor catalog ~/dev
+devctl doctor privacy .
+```
+
+`doctor catalog` tells you whether a private overlay is loaded, whether the
+active pilot catalog matches the selected workspace root, and how many contracts
+are active. It reports counts and sanitized root labels, not private repo names.
+
+`doctor privacy` scans the public repo for absolute home paths, email addresses,
+and optional local private patterns.
+
+Then inspect the workspace:
+
+```bash
+devctl inventory ~/dev
+devctl standards audit ~/dev --all
+devctl standards plan ~/dev --all --risk P0,P1
+```
+
+If `standards plan ~/dev --risk P0,P1` returns a zero-repo pilot warning, load a
+private catalog overlay or use `--all` intentionally.
+
+## Command Guide
 
 ```bash
 devctl inventory ~/dev --json
+devctl repo explain ~/dev/sample-web-product
+
 devctl standards audit ~/dev --pilot three-tier
-devctl standards adjudication-template ~/dev --pilot three-tier --risk P0,P1
 devctl standards audit ~/dev --all --json
 devctl standards contracts ~/dev --pilot three-tier
 devctl standards plan ~/dev --risk P0,P1
 devctl standards plan ~/dev --all --risk P0,P1
+devctl standards adjudication-template ~/dev --pilot three-tier --risk P0,P1
+devctl standards propose-contract ~/dev/sample-web-product
 devctl standards packet ~/dev --pilot three-tier --risk P0,P1
-devctl standards propose-contract ~/dev/sample-desktop-edge
 devctl standards report ~/dev --pilot three-tier
-devctl repo explain ~/dev/sample-desktop-edge
+
 devctl doctor catalog ~/dev
 devctl doctor privacy .
 ```
 
-## Standards loop
+## Standards Loop
 
-V0.1 adds the review loop around the original read-only audit:
+The normal operating loop is:
 
-- `catalog/archetypes.toml` defines the repo shapes that make standards
-  sensible.
-- `catalog/contracts/` contains operator-owned repo contracts with typed command,
-  Cloudflare, release, token, and artifact records. Target repos are still
-  read-only.
-- `catalog/local/` or `DEVCTL_CATALOG_HOME` can provide ignored private operator
-  overlays. Local overlay values replace public pilot lists and override matching
-  repo statuses/contracts without making private repo names public.
-- `catalog/laws.toml` declares the active laws and their maturity.
-- `catalog/adjudications.toml` records explicit review decisions by finding
-  fingerprint.
-- `standards contracts` compares typed repo contracts to observed repo reality.
-- `standards adjudication-template` prints review stubs for unreviewed findings.
-- `standards propose-contract` prints an inferred repo contract to stdout only.
-- `standards plan` excludes findings adjudicated as `accepted-exception`,
-  `false-positive`, or `law-needs-work`, then groups remaining work by
-  repo/law/requirement so tranches are PR-sized. It accepts the same `--pilot`
-  and `--all` scope controls as audit and warns when the selected scope matches
-  zero repos.
-- `standards packet` writes the pilot operating packet: contract proposals,
-  adjudication stubs, risk-scoped tranches, and ordered next actions.
-- `standards report` writes JSON and Markdown snapshots under `reports/`.
+1. Run `doctor catalog` and `doctor privacy`.
+2. Run `inventory` to confirm repo discovery.
+3. Run `standards contracts` to compare declared intent with observed reality.
+4. Run `standards audit` to collect file:line findings.
+5. Run `standards adjudication-template` to review true positives and
+   exceptions.
+6. Run `standards plan` or `standards packet` to produce PR-sized repair work.
+7. Repair target repos manually in their own PRs.
 
-Generated reports are ignored by git. They are evidence artifacts, not source
-policy.
+`devctl` stays read-only through this loop. The target repos carry the actual
+repairs.
 
-The repo development flow is the center of the system. Contracts and archetypes
-define intent; `devctl` is the read-only instrument panel that observes drift,
-proposes contracts, and packages repair work.
+## Catalogs
 
-## Privacy Gate
+The catalog is the source of intent:
 
-Before publishing public branches, run:
+- `catalog/laws.toml` declares standards and maturity.
+- `catalog/archetypes.toml` describes repo shapes and required capabilities.
+- `catalog/contracts/` declares repo-specific expectations.
+- `catalog/adjudications.toml` records reviewed finding decisions.
+- `catalog/workspace.toml` selects pilot repos and status values.
 
-```bash
-devctl doctor catalog ~/dev
-devctl doctor privacy .
-```
+Private overlays can replace pilot lists and override matching repo statuses or
+contracts without committing private repo names to the public repo.
 
-The catalog doctor reports whether a private local overlay is loaded, how many
-pilot repos/contracts are active, and whether the selected workspace root
-matches the active pilot catalog. It intentionally reports counts and sanitized
-root labels, not private repo names.
+See `catalog/README.md` for the editing model.
 
-The privacy doctor scans tracked-style source, docs, catalogs, and generated
-reports while ignoring `.git`, `target`, and `node_modules`. It flags absolute
-home paths and email addresses by default. Set `DEVCTL_PRIVACY_PATTERNS` to a
-comma-separated list of additional regular expressions for local private names
-or domains.
+## Output Rules
+
+- JSON output uses `schema_version = "0.1.0"`.
+- Findings include file:line evidence when available.
+- Human output sorts actionable work by severity, repo, and law.
+- Secret values are never printed. Key names, file paths, file modes, and line
+  numbers are acceptable evidence.
+- Publication checks should run `doctor privacy` before pushing public branches.
 
 ## Verification
 
@@ -84,4 +141,5 @@ or domains.
 cargo fmt --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
+cargo doc --workspace --no-deps
 ```
