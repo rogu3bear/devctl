@@ -47,7 +47,15 @@ struct DoctorArgs {
 
 #[derive(Subcommand)]
 enum DoctorCommand {
+    Catalog(CatalogArgs),
     Privacy(PrivacyArgs),
+}
+
+#[derive(Args)]
+struct CatalogArgs {
+    root: Option<Utf8PathBuf>,
+    #[arg(long)]
+    json: bool,
 }
 
 #[derive(Args)]
@@ -103,6 +111,10 @@ enum Pilot {
 #[derive(Args)]
 struct PlanArgs {
     root: Utf8PathBuf,
+    #[arg(long, value_enum)]
+    pilot: Option<Pilot>,
+    #[arg(long)]
+    all: bool,
     #[arg(long, default_value = "P0,P1")]
     risk: String,
     #[arg(long)]
@@ -587,8 +599,26 @@ struct AuditOutput {
 struct PlanOutput {
     schema_version: &'static str,
     root: Utf8PathBuf,
+    scope: String,
     risk: Vec<Severity>,
+    repos: usize,
+    findings: usize,
+    warnings: Vec<String>,
     tranches: Vec<RepairTranche>,
+}
+
+#[derive(Debug, Serialize)]
+struct CatalogOutput {
+    schema_version: &'static str,
+    public_root: String,
+    local_root: Option<String>,
+    local_overlay_loaded: bool,
+    pilot_repo_count: usize,
+    contract_count: usize,
+    root: Option<String>,
+    discovered_repo_count: Option<usize>,
+    pilot_match_count: Option<usize>,
+    warnings: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -816,6 +846,14 @@ pub fn run() -> DevResult<()> {
             }
         },
         Commands::Doctor(args) => match args.command {
+            DoctorCommand::Catalog(args) => {
+                let output = catalog_doctor_command(&args)?;
+                if args.json {
+                    print_json(&output)?;
+                } else {
+                    print_catalog_human(&output);
+                }
+            }
             DoctorCommand::Privacy(args) => {
                 let output = privacy_doctor_command(&args)?;
                 if args.json {
@@ -868,11 +906,16 @@ fn plan_command(args: &PlanArgs) -> DevResult<PlanOutput> {
     let risk = parse_risk(&args.risk)?;
     let audit = audit_command(&AuditArgs {
         root: args.root.clone(),
-        pilot: Some(Pilot::ThreeTier),
-        all: false,
+        pilot: args.pilot.clone(),
+        all: args.all,
         json: true,
         fail_on: None,
     })?;
+    let root = audit.root.clone();
+    let scope = audit.scope.clone();
+    let repos = audit.repos.len();
+    let findings = audit.findings.len();
+    let warnings = planning_warnings(&scope, repos, findings, &risk);
     let filtered: Vec<Finding> = audit
         .findings
         .into_iter()
@@ -881,9 +924,82 @@ fn plan_command(args: &PlanArgs) -> DevResult<PlanOutput> {
     let tranches = build_tranches(&filtered);
     Ok(PlanOutput {
         schema_version: SCHEMA_VERSION,
-        root: normalize_path(&args.root),
+        root,
+        scope,
         risk,
+        repos,
+        findings,
+        warnings,
         tranches,
+    })
+}
+
+fn planning_warnings(scope: &str, repos: usize, findings: usize, risk: &[Severity]) -> Vec<String> {
+    let mut warnings = Vec::new();
+    if repos == 0 {
+        warnings.push(format!(
+            "Selected scope {scope:?} matched zero repos; load a private catalog overlay or use --all."
+        ));
+    } else if findings == 0
+        && risk
+            .iter()
+            .any(|severity| matches!(severity, Severity::P0 | Severity::P1))
+    {
+        warnings.push(format!(
+            "Selected scope {scope:?} matched repos but produced no findings for the requested risk."
+        ));
+    }
+    warnings
+}
+
+fn catalog_doctor_command(args: &CatalogArgs) -> DevResult<CatalogOutput> {
+    let public_root = catalog_public_root();
+    let local_root = catalog_local_root();
+    let catalog = load_workspace_catalog()?;
+    let contracts = load_contracts_catalog()?;
+    let mut warnings = Vec::new();
+    if local_root.is_none() {
+        warnings.push(
+            "No private catalog overlay is loaded; pilot scope uses public sample catalog data."
+                .to_string(),
+        );
+    }
+    if catalog.pilot_three_tier.is_empty() {
+        warnings.push("The active pilot catalog has no repos.".to_string());
+    }
+
+    let mut root = None;
+    let mut discovered_repo_count = None;
+    let mut pilot_match_count = None;
+    if let Some(input_root) = &args.root {
+        let normalized = normalize_path(input_root);
+        let repos = inventory(&normalized, &catalog)?;
+        let matches = repos
+            .iter()
+            .filter(|repo| catalog.pilot_three_tier.contains(&repo.name))
+            .count();
+        if !catalog.pilot_three_tier.is_empty() && matches == 0 {
+            warnings.push(
+                "The active pilot catalog matched zero discovered repos at the requested root."
+                    .to_string(),
+            );
+        }
+        root = Some(privacy_output_root(input_root, &normalized));
+        discovered_repo_count = Some(repos.len());
+        pilot_match_count = Some(matches);
+    }
+
+    Ok(CatalogOutput {
+        schema_version: SCHEMA_VERSION,
+        public_root: catalog_root_label(&public_root),
+        local_root: local_root.as_ref().map(|path| catalog_root_label(path)),
+        local_overlay_loaded: local_root.is_some(),
+        pilot_repo_count: catalog.pilot_three_tier.len(),
+        contract_count: contracts.contracts.len(),
+        root,
+        discovered_repo_count,
+        pilot_match_count,
+        warnings,
     })
 }
 
@@ -1273,11 +1389,22 @@ fn catalog_public_root() -> Utf8PathBuf {
 }
 
 fn catalog_local_root() -> Option<Utf8PathBuf> {
+    let local = catalog_local_root_candidate()?;
+    local.is_dir().then_some(local)
+}
+
+fn catalog_local_root_candidate() -> Option<Utf8PathBuf> {
     if let Some(path) = env::var_os("DEVCTL_CATALOG_HOME") {
         return Utf8PathBuf::from_path_buf(path.into()).ok();
     }
-    let local = catalog_public_root().join("local");
-    local.is_dir().then_some(local)
+    Some(catalog_public_root().join("local"))
+}
+
+fn catalog_root_label(path: &Utf8Path) -> String {
+    let manifest_root = Utf8Path::new(env!("CARGO_MANIFEST_DIR"));
+    path.strip_prefix(manifest_root)
+        .map(|relative| relative.to_string())
+        .unwrap_or_else(|_| "<external-catalog>".to_string())
 }
 
 fn validate_laws_catalog(catalog: &LawsCatalog) -> DevResult<()> {
@@ -3386,6 +3513,7 @@ fn print_audit_human(output: &AuditOutput) {
 fn print_plan_human(output: &PlanOutput) {
     println!("devctl standards plan");
     println!("root: {}", output.root);
+    println!("scope: {}", output.scope);
     println!(
         "risk: {}",
         output
@@ -3395,6 +3523,11 @@ fn print_plan_human(output: &PlanOutput) {
             .collect::<Vec<_>>()
             .join(",")
     );
+    println!("repos: {}", output.repos);
+    println!("findings: {}", output.findings);
+    for warning in &output.warnings {
+        println!("warning: {warning}");
+    }
     println!("tranches: {}", output.tranches.len());
     for tranche in &output.tranches {
         println!(
@@ -3404,6 +3537,30 @@ fn print_plan_human(output: &PlanOutput) {
             tranche.repos.join(","),
             tranche.findings.join(",")
         );
+    }
+}
+
+fn print_catalog_human(output: &CatalogOutput) {
+    println!("devctl doctor catalog");
+    println!("public_root: {}", output.public_root);
+    println!(
+        "local_root: {}",
+        output.local_root.as_deref().unwrap_or("not-loaded")
+    );
+    println!("local_overlay_loaded: {}", output.local_overlay_loaded);
+    println!("pilot_repo_count: {}", output.pilot_repo_count);
+    println!("contract_count: {}", output.contract_count);
+    if let Some(root) = &output.root {
+        println!("root: {root}");
+    }
+    if let Some(count) = output.discovered_repo_count {
+        println!("discovered_repo_count: {count}");
+    }
+    if let Some(count) = output.pilot_match_count {
+        println!("pilot_match_count: {count}");
+    }
+    for warning in &output.warnings {
+        println!("warning: {warning}");
     }
 }
 
@@ -3760,6 +3917,51 @@ shared-repo = "legacy"
         assert_eq!(tranches.len(), 1);
         assert_eq!(tranches[0].severity, Severity::P0);
         assert_eq!(tranches[0].repos, vec!["demo"]);
+    }
+
+    #[test]
+    fn plan_all_scope_does_not_silently_ignore_non_pilot_repos() {
+        let fixture = TestWorkspace::new();
+        let repo = fixture.repo("non-pilot");
+        repo.write(".env", "TOKEN=value\n");
+
+        let output = plan_command(&PlanArgs {
+            root: fixture.root.clone(),
+            pilot: None,
+            all: true,
+            risk: "P0,P1".to_string(),
+            json: true,
+        })
+        .expect("plan runs");
+
+        assert_eq!(output.scope, "all");
+        assert_eq!(output.repos, 1);
+        assert!(!output.tranches.is_empty());
+        assert!(output.warnings.is_empty());
+    }
+
+    #[test]
+    fn plan_warns_when_selected_pilot_scope_matches_zero_repos() {
+        let fixture = TestWorkspace::new();
+        fixture.repo("non-pilot").write("AGENTS.md", "repo\n");
+
+        let output = plan_command(&PlanArgs {
+            root: fixture.root.clone(),
+            pilot: None,
+            all: false,
+            risk: "P0,P1".to_string(),
+            json: true,
+        })
+        .expect("plan runs");
+
+        assert_eq!(output.scope, "pilot:three-tier");
+        assert_eq!(output.repos, 0);
+        assert!(
+            output
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("matched zero repos"))
+        );
     }
 
     #[test]
