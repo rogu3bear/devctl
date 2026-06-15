@@ -11,12 +11,13 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 const SCHEMA_VERSION: &str = "0.1.0";
 const TOOL_VERSION: &str = env!("CARGO_PKG_VERSION");
-const V0_LAWS: [&str; 5] = [
+const V0_LAWS: [&str; 6] = [
     "cloudflare-mutation",
     "token",
     "command-verification",
     "release-proof",
     "artifact-boundary",
+    "doctrine-quartet",
 ];
 const CONTRACT_LAW: &str = "repo-contract";
 
@@ -408,6 +409,8 @@ pub struct GitInfo {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct DocsInfo {
+    pub north_star: Option<Utf8PathBuf>,
+    pub anchor: Option<Utf8PathBuf>,
     pub agents: Option<Utf8PathBuf>,
     pub claude: Option<Utf8PathBuf>,
     pub readme: Option<Utf8PathBuf>,
@@ -1599,6 +1602,8 @@ fn infer_status(path: &Utf8Path) -> RepoStatus {
 
 fn scan_docs(path: &Utf8Path) -> DocsInfo {
     DocsInfo {
+        north_star: exists_path(path, "NORTH_STAR.md"),
+        anchor: exists_path(path, "ANCHOR.md"),
         agents: exists_path(path, "AGENTS.md"),
         claude: exists_path(path, "CLAUDE.md"),
         readme: exists_path(path, "README.md"),
@@ -1834,6 +1839,7 @@ fn audit_repos(
         }
         audit_cloudflare(repo, &mut findings)?;
         audit_tokens(repo, &mut findings)?;
+        audit_doctrine_quartet(repo, &mut findings)?;
         audit_command_verification(repo, &mut findings)?;
         audit_release(repo, &mut findings)?;
         audit_artifacts(repo, &mut findings)?;
@@ -1883,6 +1889,7 @@ fn scanner_requirement_id(finding: &Finding) -> &'static str {
         "cloudflare-governance" => "cloudflare-mutation-lane-classified",
         "cloudflare-token-law" => "cloudflare-parent-token-contained",
         "secret-file-permissions" => "secret-file-permissions-private",
+        "doctrine-quartet" => "contract-quartet-present",
         "verification-contract" => "canonical-verification-command-present",
         "script-ownership" => "script-state-classified",
         "release-proof" => "release-lane-proof-bound",
@@ -1900,6 +1907,9 @@ fn scanner_expected(finding: &Finding) -> &'static str {
             "Parent Cloudflare tokens remain in allowlisted control-plane or rotation contexts"
         }
         "secret-file-permissions" => "Secret-bearing env files are not group/world readable",
+        "doctrine-quartet" => {
+            "Every real repo carries the NORTH_STAR/ANCHOR/AGENTS/CLAUDE contract quartet"
+        }
         "verification-contract" => "Active repos declare a canonical verification surface",
         "script-ownership" => {
             "Check/verify scripts have a gated/recovery/transitive/retired classification"
@@ -2402,6 +2412,45 @@ fn audit_tokens(repo: &RepoRecord, findings: &mut Vec<Finding>) -> DevResult<()>
                 ));
             }
         }
+    }
+    Ok(())
+}
+
+fn audit_doctrine_quartet(repo: &RepoRecord, findings: &mut Vec<Finding>) -> DevResult<()> {
+    if matches!(repo.status, RepoStatus::Template | RepoStatus::Unknown) {
+        return Ok(());
+    }
+    let quartet: [(&str, &Option<Utf8PathBuf>); 4] = [
+        ("NORTH_STAR.md", &repo.docs.north_star),
+        ("ANCHOR.md", &repo.docs.anchor),
+        ("AGENTS.md", &repo.docs.agents),
+        ("CLAUDE.md", &repo.docs.claude),
+    ];
+    for (name, present) in quartet {
+        if present.is_some() {
+            continue;
+        }
+        let message = format!("Repo is missing contract quartet file {name}");
+        let evidence = format!(
+            "{name} not found at repo root; workspace doctrine expects the full \
+             NORTH_STAR/ANCHOR/AGENTS/CLAUDE quartet"
+        );
+        let recommendation = format!(
+            "Author {name} from live repo truth so workspace standards sprinkle down \
+             and stay enforceable."
+        );
+        findings.push(Finding::new(
+            "doctrine-quartet",
+            Severity::P2,
+            repo,
+            repo_anchor(repo),
+            None,
+            &message,
+            &evidence,
+            &recommendation,
+            Confidence::High,
+            "doctrine-quartet",
+        ));
     }
     Ok(())
 }
@@ -3255,7 +3304,9 @@ fn print_repo_human(repo: &RepoRecord) {
     println!("path: {}", repo.path);
     println!("status: {}", repo.status);
     println!(
-        "docs: AGENTS={} CLAUDE={} README={} SECURITY={}",
+        "docs: NORTH_STAR={} ANCHOR={} AGENTS={} CLAUDE={} README={} SECURITY={}",
+        repo.docs.north_star.is_some(),
+        repo.docs.anchor.is_some(),
         repo.docs.agents.is_some(),
         repo.docs.claude.is_some(),
         repo.docs.readme.is_some(),
@@ -3361,6 +3412,40 @@ mod tests {
             findings
                 .iter()
                 .any(|finding| finding.law == "artifact-boundary")
+        );
+    }
+
+    #[test]
+    fn missing_quartet_files_produce_doctrine_findings() {
+        let fixture = TestRepo::new("doctrine-repo");
+        fixture.write("AGENTS.md", "active repo\n");
+        fixture.write("Cargo.toml", "[package]\nname = \"doctrine-repo\"\n");
+        let messages: Vec<String> = fixture
+            .audit()
+            .into_iter()
+            .filter(|finding| finding.law == "doctrine-quartet")
+            .map(|finding| finding.message)
+            .collect();
+        // AGENTS.md is present, so only the other three quartet files are findings.
+        assert!(messages.iter().any(|m| m.contains("NORTH_STAR.md")));
+        assert!(messages.iter().any(|m| m.contains("ANCHOR.md")));
+        assert!(messages.iter().any(|m| m.contains("CLAUDE.md")));
+        assert!(!messages.iter().any(|m| m.contains("AGENTS.md")));
+    }
+
+    #[test]
+    fn complete_quartet_produces_no_doctrine_finding() {
+        let fixture = TestRepo::new("complete-repo");
+        fixture.write("NORTH_STAR.md", "north\n");
+        fixture.write("ANCHOR.md", "anchor\n");
+        fixture.write("AGENTS.md", "agents\n");
+        fixture.write("CLAUDE.md", "claude\n");
+        fixture.write("Cargo.toml", "[package]\nname = \"complete-repo\"\n");
+        assert!(
+            !fixture
+                .audit()
+                .iter()
+                .any(|finding| finding.law == "doctrine-quartet")
         );
     }
 
