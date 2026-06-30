@@ -8,6 +8,10 @@ id = "fmt"
 command = "cargo fmt --check"
 
 [[canonical_commands]]
+id = "self-check"
+command = "bash scripts/check-devctl.sh"
+
+[[canonical_commands]]
 id = "clippy"
 command = "cargo clippy --workspace --all-targets -- -D warnings"
 
