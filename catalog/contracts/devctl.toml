@@ -1,0 +1,38 @@
+schema_version = "0.1.0"
+repo = "devctl"
+archetype = "rust-workspace"
+status = "active-control-plane"
+
+[[canonical_commands]]
+id = "fmt"
+command = "cargo fmt --check"
+
+[[canonical_commands]]
+id = "clippy"
+command = "cargo clippy --workspace --all-targets -- -D warnings"
+
+[[canonical_commands]]
+id = "test"
+command = "cargo test --workspace"
+
+[[canonical_commands]]
+id = "docs"
+command = "cargo doc --workspace --no-deps"
+
+[[canonical_commands]]
+id = "contracts"
+command = "cargo run -- standards contracts ~/dev --all --json"
+
+[[canonical_commands]]
+id = "plan"
+command = "cargo run -- standards plan ~/dev --all --risk P0,P1 --json"
+
+[cloudflare]
+posture = "none"
+
+[release]
+evidence_dirs = []
+
+[artifacts.classifications]
+reports = "generated-standards-reports"
+var = "local-runtime-and-cargo-gate-state"
