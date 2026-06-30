@@ -1,0 +1,60 @@
+schema_version = "0.1.0"
+repo = "maildesk-cf"
+archetype = "cloudflare-product"
+status = "active-product"
+
+[[canonical_commands]]
+id = "router-test"
+command = "cargo test"
+
+[[canonical_commands]]
+id = "router-lint"
+command = "cargo clippy --all-targets -- -D warnings"
+
+[[canonical_commands]]
+id = "typecheck"
+command = "bun run typecheck"
+
+[[canonical_commands]]
+id = "template-preflight"
+command = "bun run preflight:template"
+
+[[canonical_commands]]
+id = "template-hygiene"
+command = "bash scripts/check-template.sh"
+
+[[canonical_commands]]
+id = "maildesk-verifier"
+command = "bun run verify:maildesk"
+
+[cloudflare]
+posture = "cfctl-native"
+
+[[cloudflare.surfaces]]
+id = "mail-api-worker"
+kind = "worker"
+wrangler_config = "wrangler.toml"
+
+[[cloudflare.surfaces]]
+id = "mail-router-worker"
+kind = "email-worker"
+wrangler_config = "wrangler.mail-router.toml"
+
+[[cloudflare.surfaces]]
+id = "workers"
+kind = "worker-dir"
+path = "workers"
+
+[release]
+evidence_dirs = ["var"]
+
+[[release.lanes]]
+id = "template"
+command = "bun run preflight:template"
+preflight = "bun install --frozen-lockfile"
+post_verify = "bash scripts/check-template.sh"
+evidence = ["var"]
+mutates_cloudflare = false
+
+[artifacts.classifications]
+var = "operator-runtime-and-proof-evidence"
