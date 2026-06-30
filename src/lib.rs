@@ -1068,25 +1068,48 @@ fn load_archetypes_catalog() -> DevResult<ArchetypesCatalog> {
 }
 
 fn load_contracts_catalog() -> DevResult<ContractsCatalog> {
-    let root = Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("catalog/contracts");
+    let manifest_root = Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let mut catalog = ContractsCatalog::default();
+    load_contracts_dir(
+        &manifest_root.join("catalog/contracts"),
+        &mut catalog,
+        false,
+    )?;
+    load_contracts_dir(
+        &manifest_root.join("catalog/local/contracts"),
+        &mut catalog,
+        true,
+    )?;
+    Ok(catalog)
+}
+
+fn load_contracts_dir(
+    root: &Utf8Path,
+    catalog: &mut ContractsCatalog,
+    allow_override: bool,
+) -> DevResult<()> {
     if !root.is_dir() {
-        return Ok(catalog);
+        return Ok(());
     }
+    let mut entries = Vec::new();
     for entry in fs::read_dir(root)? {
         let entry = entry?;
-        if !entry.file_type()?.is_file() {
-            continue;
-        }
         let path = Utf8PathBuf::from_path_buf(entry.path())
             .map_err(|path| format!("non-utf8 contract path: {}", path.display()))?;
+        entries.push(path);
+    }
+    entries.sort();
+    for path in entries {
+        if !path.is_file() {
+            continue;
+        }
         if path.extension() != Some("toml") {
             continue;
         }
         let body = fs::read_to_string(&path)?;
         let lines = toml_line_map(&body);
         let contract: RepoContract = toml::from_str(&body)?;
-        if catalog.contracts.contains_key(&contract.repo) {
+        if !allow_override && catalog.contracts.contains_key(&contract.repo) {
             return Err(format!("duplicate contract for repo {}", contract.repo).into());
         }
         catalog.contracts.insert(
@@ -1098,7 +1121,7 @@ fn load_contracts_catalog() -> DevResult<ContractsCatalog> {
             },
         );
     }
-    Ok(catalog)
+    Ok(())
 }
 
 fn load_adjudications_catalog() -> DevResult<AdjudicationsCatalog> {
@@ -3450,6 +3473,27 @@ mod tests {
     }
 
     #[test]
+    fn local_contract_overlay_is_loaded() {
+        let _fixture = LocalCatalogFixture::contract(
+            "tdd-private-overlay",
+            r#"schema_version = "0.1.0"
+repo = "tdd-private-overlay"
+archetype = "rust-workspace"
+status = "active-product"
+canonical_commands = ["cargo test --workspace"]
+
+[cloudflare]
+posture = "none"
+
+[release]
+evidence_dirs = []
+"#,
+        );
+        let contracts = load_contracts_catalog().expect("contracts load");
+        assert!(contracts.contracts.contains_key("tdd-private-overlay"));
+    }
+
+    #[test]
     fn inventory_json_has_schema_version() {
         let fixture = TestWorkspace::new();
         fixture
@@ -3929,6 +3973,31 @@ mod tests {
 
     struct TestRepo {
         root: Utf8PathBuf,
+    }
+
+    struct LocalCatalogFixture {
+        path: Utf8PathBuf,
+    }
+
+    impl LocalCatalogFixture {
+        fn contract(name: &str, body: &str) -> Self {
+            let path = Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("catalog/local/contracts")
+                .join(format!("{name}.toml"));
+            if let Some(parent) = path.parent() {
+                fs::create_dir_all(parent).expect("local catalog dir created");
+            }
+            let mut file = fs::File::create(&path).expect("local contract created");
+            file.write_all(body.as_bytes())
+                .expect("local contract written");
+            Self { path }
+        }
+    }
+
+    impl Drop for LocalCatalogFixture {
+        fn drop(&mut self) {
+            let _ = fs::remove_file(&self.path);
+        }
     }
 
     impl TestRepo {
