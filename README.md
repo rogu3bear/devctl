@@ -30,6 +30,9 @@ V0.1 adds the review loop around the original read-only audit:
 - `catalog/contracts/` contains operator-owned repo contracts with typed command,
   Cloudflare, release, token, and artifact records. Target repos are still
   read-only.
+- `catalog/local/contracts/` is ignored and may contain private operator
+  contracts. Local contracts load after public contracts and override matching
+  repo names without being published.
 - `catalog/laws.toml` declares the active laws and their maturity.
 - `catalog/adjudications.toml` records explicit review decisions by finding
   fingerprint.
