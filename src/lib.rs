@@ -744,7 +744,7 @@ pub fn run() -> DevResult<()> {
                 if args.json {
                     print_json(&output)?;
                 } else {
-                    print_toml(&output)?;
+                    print_toml(&build_catalog_contract_draft(&output))?;
                 }
             }
             StandardsCommand::Report(args) => {
@@ -1990,6 +1990,39 @@ fn build_contract_proposal(
             classifications: artifact_classifications,
         },
         exceptions: Vec::new(),
+    }
+}
+
+fn build_catalog_contract_draft(proposal: &RepoContractProposal) -> RepoContract {
+    RepoContract {
+        schema_version: proposal.schema_version.to_string(),
+        repo: proposal.repo.clone(),
+        archetype: proposal.archetype.clone(),
+        status: proposal.status.clone(),
+        canonical_commands: proposal
+            .canonical_commands
+            .iter()
+            .cloned()
+            .map(CommandContract::Text)
+            .collect(),
+        cloudflare: ContractCloudflare {
+            posture: proposal.cloudflare.posture.clone(),
+            surfaces: proposal
+                .cloudflare
+                .surfaces
+                .iter()
+                .cloned()
+                .map(CloudflareSurface::Path)
+                .collect(),
+            ..Default::default()
+        },
+        release: ContractRelease {
+            evidence_dirs: proposal.release.evidence_dirs.clone(),
+            ..Default::default()
+        },
+        artifacts: ContractArtifacts {
+            classifications: proposal.artifacts.classifications.clone(),
+        },
     }
 }
 
@@ -3724,6 +3757,29 @@ evidence_dirs = []
         assert!(!proposal.inferred);
         assert_eq!(proposal.archetype, "rust-workspace");
         assert_eq!(proposal.canonical_commands, vec!["cargo test --workspace"]);
+    }
+
+    #[test]
+    fn catalog_contract_draft_strips_local_proposal_metadata() {
+        let fixture = TestRepo::new("contract-repo");
+        fixture.write("AGENTS.md", "active repo\n");
+        fixture.write("Cargo.toml", "[package]\nname = \"contract-repo\"\n");
+        fixture.write("wrangler.toml", "name = \"contract-repo\"\n");
+        fixture.mkdir("artifacts");
+        let catalog = test_catalog();
+        let repo = scan_repo(&fixture.root, &catalog).expect("repo scans");
+        let proposal = build_contract_proposal(&repo, None);
+        let draft = build_catalog_contract_draft(&proposal);
+        let toml = toml::to_string_pretty(&draft).expect("draft serializes");
+
+        assert!(toml.contains("repo = \"contract-repo\""));
+        assert!(toml.contains("cargo check --workspace"));
+        assert!(toml.contains("posture = \"undeclared\""));
+        assert!(!toml.contains("path = "));
+        assert!(!toml.contains("inferred"));
+        assert!(!toml.contains("present_top_level"));
+        assert!(!toml.contains("has_policy"));
+        assert!(!toml.contains(fixture.root.as_str()));
     }
 
     #[test]

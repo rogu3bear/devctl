@@ -17,6 +17,7 @@ devctl standards contracts ~/dev --pilot three-tier
 devctl standards plan ~/dev --all --risk P0,P1
 devctl standards packet ~/dev --pilot three-tier --risk P0,P1
 devctl standards propose-contract ~/dev/sample-desktop-edge
+devctl standards propose-contract ~/dev/sample-desktop-edge --json
 devctl standards report ~/dev --pilot three-tier
 devctl repo explain ~/dev/sample-desktop-edge
 ```
@@ -38,7 +39,9 @@ V0.1 adds the review loop around the original read-only audit:
   fingerprint.
 - `standards contracts` compares typed repo contracts to observed repo reality.
 - `standards adjudication-template` prints review stubs for unreviewed findings.
-- `standards propose-contract` prints an inferred repo contract to stdout only.
+- `standards propose-contract` prints a catalog-shaped TOML draft to stdout
+  only, with local proposal metadata such as absolute paths stripped. Add
+  `--json` when you need the full evidence/proposal payload.
 - `standards plan` excludes findings adjudicated as `accepted-exception`,
   `false-positive`, or `law-needs-work`, then groups remaining work by
   repo/law/requirement so tranches are PR-sized.
