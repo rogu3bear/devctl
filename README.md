@@ -14,7 +14,7 @@ devctl standards audit ~/dev --pilot three-tier
 devctl standards adjudication-template ~/dev --pilot three-tier --risk P0,P1
 devctl standards audit ~/dev --all --json
 devctl standards contracts ~/dev --pilot three-tier
-devctl standards plan ~/dev --risk P0,P1
+devctl standards plan ~/dev --all --risk P0,P1
 devctl standards packet ~/dev --pilot three-tier --risk P0,P1
 devctl standards propose-contract ~/dev/sample-desktop-edge
 devctl standards report ~/dev --pilot three-tier

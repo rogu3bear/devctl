@@ -83,6 +83,10 @@ enum Pilot {
 #[derive(Args)]
 struct PlanArgs {
     root: Utf8PathBuf,
+    #[arg(long, value_enum)]
+    pilot: Option<Pilot>,
+    #[arg(long)]
+    all: bool,
     #[arg(long, default_value = "P0,P1")]
     risk: String,
     #[arg(long)]
@@ -806,8 +810,8 @@ fn plan_command(args: &PlanArgs) -> DevResult<PlanOutput> {
     let risk = parse_risk(&args.risk)?;
     let audit = audit_command(&AuditArgs {
         root: args.root.clone(),
-        pilot: Some(Pilot::ThreeTier),
-        all: false,
+        pilot: args.pilot.clone(),
+        all: args.all,
         json: true,
         fail_on: None,
     })?;
@@ -3541,6 +3545,33 @@ evidence_dirs = []
         assert_eq!(tranches.len(), 1);
         assert_eq!(tranches[0].severity, Severity::P0);
         assert_eq!(tranches[0].repos, vec!["demo"]);
+    }
+
+    #[test]
+    fn plan_all_includes_contract_findings_outside_pilot() {
+        let workspace = TestWorkspace::new();
+        let repo = workspace.repo("contractless-plan-repo");
+        repo.write("NORTH_STAR.md", "north\n");
+        repo.write("ANCHOR.md", "anchor\n");
+        repo.write("AGENTS.md", "agents\n");
+        repo.write("CLAUDE.md", "claude\n");
+        repo.write(
+            "Cargo.toml",
+            "[package]\nname = \"contractless-plan-repo\"\n",
+        );
+
+        let output = plan_command(&PlanArgs {
+            root: workspace.root.clone(),
+            pilot: None,
+            all: true,
+            risk: "P1".to_string(),
+            json: true,
+        })
+        .expect("plan succeeds");
+
+        assert!(output.tranches.iter().any(|tranche| {
+            tranche.id == "contractless-plan-repo:repo-contract:active-repo-contract-present"
+        }));
     }
 
     #[test]
