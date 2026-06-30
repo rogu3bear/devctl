@@ -35,3 +35,9 @@ id = "repo-contract"
 title = "Repo contract law"
 description = "Active repos must resolve to a typed devctl contract whose archetype, posture, commands, release evidence, and artifact classes match observed repo reality."
 maturity = "pilot"
+
+[[laws]]
+id = "doctrine-quartet"
+title = "Doctrine quartet law"
+description = "Every real repo must carry the contract quartet — NORTH_STAR.md, ANCHOR.md, AGENTS.md, CLAUDE.md — so workspace standards sprinkle down per repo and cannot drift silently. Missing quartet files are findings with file:line evidence at the repo anchor."
+maturity = "pilot"
