@@ -5,8 +5,10 @@
 ## Scope
 
 - The public interface is the `devctl` CLI.
-- Catalog policy lives under `catalog/`.
-- Archetypes and contracts are first-class policy; scanners provide evidence, not the source of intent.
+- Catalog checks and typed operator declarations live under `catalog/`; shared
+  rule authority stays with `mlnavigator-ai/standards` at the recorded revision.
+- Contracts preserve explicitly selected intent; scanners provide advisory
+  evidence, not adoption, permission or a mandatory document stack.
 - Generated standards reports live under `reports/` and remain gitignored.
 - The CLI may inspect sibling repos, but V0 must not edit them.
 - Contract proposals and adjudication templates must print or report only; they must not write to target repos.

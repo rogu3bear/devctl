@@ -14,8 +14,8 @@ cargo test --workspace
 cargo doc --workspace --no-deps
 
 if [[ -d "${FOREST_ROOT}" ]]; then
-  cargo run -- standards contracts "${FOREST_ROOT}" --all --json >"${CONTRACTS_OUT}"
-  cargo run -- standards plan "${FOREST_ROOT}" --all --risk P0,P1 --json >"${PLAN_OUT}"
+  cargo run -- --catalog-root "${ROOT_DIR}/catalog" standards contracts "${FOREST_ROOT}" --all --json >"${CONTRACTS_OUT}"
+  cargo run -- --catalog-root "${ROOT_DIR}/catalog" standards plan "${FOREST_ROOT}" --all --risk P0,P1 --json >"${PLAN_OUT}"
 else
   printf 'devctl check: skipping forest readback; root not found: %s\n' "${FOREST_ROOT}" >&2
 fi

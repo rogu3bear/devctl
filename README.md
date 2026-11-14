@@ -24,6 +24,11 @@ devctl repo explain ~/dev/sample-desktop-edge
 
 ## Standards loop
 
+Catalog checks are advisory interpretations of `mlnavigator-ai/standards`, not
+independent rule authority. Each law names stable standard IDs and a selected
+standards revision. Local equivalents and adopted repository guidance retain
+their meaning. See [standards alignment](docs/STANDARDS-ALIGNMENT.md).
+
 V0.1 adds the review loop around the original read-only audit:
 
 - `catalog/archetypes.toml` defines the repo shapes that make standards
@@ -57,6 +62,19 @@ define intent; `devctl` is the read-only instrument panel that observes drift,
 proposes contracts, and packages repair work.
 
 ## Verification
+
+Catalogs are relocatable: put public `catalog/` beside a distributed executable,
+or select `devctl --catalog-root /path/to/catalog inventory /path/to/forest --json`.
+Source development uses `cargo run -- --catalog-root ./catalog ...`. Runtime
+lookup never uses the build machine's source directory; missing inputs fail.
+
+Direct CLI use retains the selected catalog's `local/contracts` overlay when
+present. `--no-private-contracts` disables it; `--contracts-overlay /private/path`
+selects a separate existing directory. These are read-only inputs. Component
+exports exclude all private overlays and reports. Invalid contract errors omit
+source values. MLN's audit route disables private loading unless explicitly
+selected. Report/packet commands still write outputs, under current `./reports`
+or `--out`, and do not write into a catalog merely because the binary moved.
 
 ```bash
 cargo fmt --check

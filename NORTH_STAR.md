@@ -18,8 +18,9 @@ plans. The actual repairs happen in the target repos' own PRs, by hand.
 
 - Stay read-only over target repos. `devctl` reads and reports; it never edits,
   applies, or repairs a sibling repo.
-- Treat the catalog as the source of intent and scanners as the source of
-  evidence. Findings cite file:line; intent comes from declared policy.
+- Treat the selected catalog as operator intent and scanners as evidence.
+  Shared rules stay with canonical standards; findings cite their source IDs
+  and file:line. A catalog gap does not erase existing repository intent.
 - Never print secret values. Key names, file paths, file modes, and line
   numbers are acceptable evidence; secret contents are not.
 - Keep the public repo publishable. Real operator workspace truth lives in

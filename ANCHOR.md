@@ -13,20 +13,22 @@ If a proposal conflicts with these anchors, the burden is on the proposal.
   contracts, and plans PR-sized repair work — and stops there.
 - V0 must not edit, apply, or repair target repos. Repairs happen in the target
   repos' own PRs.
-- The catalog defines intent; scanners provide evidence. Evidence is never the
-  source of truth about what a repo *should* be.
+- The selected catalog records operator intent; canonical standards and adopted
+  repository owners retain authority. Scanners provide advisory evidence.
 
 ## Architectural Anchors
 
 - The public interface is the `devctl` CLI. `src/main.rs` is a thin entrypoint;
   `src/lib.rs` carries the clap surface, scanners, catalog model, reports, and
-  tests.
+  tests; `src/catalog.rs` owns catalog paths, loading and catalog validation.
 - Command families are `inventory`, `standards`, and `repo`. The `standards`
   family owns `audit`, `contracts`, `plan`, `packet`, `report`,
   `propose-contract`, and `adjudication-template`.
 - Intent lives in `catalog/`: `laws.toml`, `archetypes.toml`, `contracts/`,
   `adjudications.toml`, `workspace.toml`. Private operator truth stays out of
   committed catalog data; `catalog/local/` is reserved for ignored local files.
+- Laws retain canonical standard IDs, selected revision and maturity. Runtime
+  catalog paths are explicit or executable-adjacent, never authoring build paths.
 - Contract schemas stay typed and source-cited. Validation rejects malformed
   catalog policy before scanners run.
 - A new law lands as catalog data plus scanner behavior together; a new

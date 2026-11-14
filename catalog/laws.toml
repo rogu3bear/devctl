@@ -1,43 +1,62 @@
-schema_version = "0.1.0"
+schema_version = "0.2.0"
+
+[standards]
+repository = "https://github.com/mlnavigator-ai/standards"
+commit = "1126724a785ee2e01ee3d5668b8e3ecefe6d1f7b"
 
 [[laws]]
 id = "cloudflare-mutation"
+standard_refs = ["STD:AUTH.BOUNDARY", "STD:AUTH.NO_LAUNDERING"]
+interpretation = "advisory heuristic; applicability and repository adoption require review"
 title = "Cloudflare mutation law"
 description = "Cloudflare repos must declare cfctl-native, cfctl-aware-wrapper, or legacy/raw-wrangler-exception; raw Wrangler/API mutation docs are findings unless explicitly excepted."
 maturity = "pilot"
 
 [[laws]]
 id = "token"
+standard_refs = ["STD:AUTH.BOUNDARY", "STD:CODE.SCOPE"]
+interpretation = "advisory heuristic; applicability and repository adoption require review"
 title = "Token law"
 description = "CF_DEV_TOKEN and CF_GLOBAL_TOKEN may only appear in allowlisted control-plane or rotation contexts; parent tokens must not become deploy credentials."
 maturity = "pilot"
 
 [[laws]]
 id = "command-verification"
+standard_refs = ["STD:VERIFY.DIRECT", "STD:VERIFY.COMPLETE"]
+interpretation = "advisory heuristic; applicability and repository adoption require review"
 title = "Command and verification law"
 description = "Active repos must expose canonical check/verify commands; check-* and verify-* scripts should be classified."
 maturity = "pilot"
 
 [[laws]]
 id = "release-proof"
+standard_refs = ["STD:VERIFY.COMPLETE", "STD:AUTH.BOUNDARY"]
+interpretation = "advisory heuristic; applicability and repository adoption require review"
 title = "Release proof law"
 description = "Deploy/release scripts must have preflight, post-deploy verification, and evidence directory declarations."
 maturity = "pilot"
 
 [[laws]]
 id = "artifact-boundary"
+standard_refs = ["STD:CODE.SCOPE", "STD:VERIFY.DIRECT"]
+interpretation = "advisory heuristic; applicability and repository adoption require review"
 title = "Artifact boundary law"
 description = "Top-level runtime, generated, evidence, and build output paths must be classified or ignored."
 maturity = "pilot"
 
 [[laws]]
 id = "repo-contract"
+standard_refs = ["STD:DOC.CONTEXT", "STD:AUTH.CURRENT_STATE"]
+interpretation = "advisory heuristic; applicability and repository adoption require review"
 title = "Repo contract law"
-description = "Active repos must resolve to a typed devctl contract whose archetype, posture, commands, release evidence, and artifact classes match observed repo reality."
+description = "Compare an explicitly selected typed operator contract to observed repository evidence. Missing catalog enrollment is an observation gap, not proof the repository lacks intent."
 maturity = "pilot"
 
 [[laws]]
 id = "doctrine-quartet"
+standard_refs = ["STD:DOC.CONTEXT"]
+interpretation = "advisory heuristic; applicability and repository adoption require review"
 title = "Doctrine quartet law"
-description = "Every real repo must carry the contract quartet — NORTH_STAR.md, ANCHOR.md, AGENTS.md, CLAUDE.md — so workspace standards sprinkle down per repo and cannot drift silently. Missing quartet files are findings with file:line evidence at the repo anchor."
-maturity = "pilot"
+description = "Retired filename-based doctrine interpretation. Read adopted local context and useful equivalents; missing optional documents do not establish noncompliance."
+maturity = "retired"
+retirement_reason = "STD:DOC.CONTEXT assigns context roles, not mandatory filenames. Retained ID preserves historical findings and adjudications; no new quartet findings are emitted."

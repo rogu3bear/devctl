@@ -11,22 +11,33 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 const SCHEMA_VERSION: &str = "0.1.0";
 const TOOL_VERSION: &str = env!("CARGO_PKG_VERSION");
-const V0_LAWS: [&str; 6] = [
+mod catalog;
+use catalog::{
+    CatalogPaths, load_adjudications_catalog, load_archetypes_catalog, load_contracts_catalog,
+    load_laws_catalog, load_workspace_catalog, validate_archetypes_catalog, validate_laws_catalog,
+};
+
+const V0_LAWS: [&str; 5] = [
     "cloudflare-mutation",
     "token",
     "command-verification",
     "release-proof",
     "artifact-boundary",
-    "doctrine-quartet",
 ];
 const CONTRACT_LAW: &str = "repo-contract";
 
 type DevResult<T> = Result<T, Box<dyn Error>>;
 
 #[derive(Parser)]
-#[command(name = "devctl")]
+#[command(name = "devctl", version)]
 #[command(about = "Read-only standards control plane for a local repo forest")]
 struct Cli {
+    #[arg(long, global = true)]
+    catalog_root: Option<Utf8PathBuf>,
+    #[arg(long, global = true, conflicts_with = "no_private_contracts")]
+    contracts_overlay: Option<Utf8PathBuf>,
+    #[arg(long, global = true)]
+    no_private_contracts: bool,
     #[command(subcommand)]
     command: Commands,
 }
@@ -178,8 +189,15 @@ struct WorkspaceCatalog {
 
 #[derive(Debug, Deserialize)]
 struct LawsCatalog {
+    standards: StandardsSource,
     schema_version: String,
     laws: Vec<LawDefinition>,
+}
+
+#[derive(Debug, Deserialize)]
+struct StandardsSource {
+    repository: String,
+    commit: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -319,6 +337,9 @@ struct LawDefinition {
     title: String,
     description: String,
     maturity: LawMaturity,
+    standard_refs: Vec<String>,
+    #[serde(default)]
+    retirement_reason: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -463,6 +484,12 @@ pub struct Finding {
     pub contract_source: Option<String>,
     pub requirement_id: Option<String>,
     pub law: String,
+    #[serde(default)]
+    pub standard_refs: Vec<String>,
+    #[serde(default)]
+    pub standard_source: Option<String>,
+    #[serde(default)]
+    pub law_maturity: Option<LawMaturity>,
     pub severity: Severity,
     pub repo: String,
     pub file: Option<Utf8PathBuf>,
@@ -676,9 +703,14 @@ struct ArtifactContract {
 
 pub fn run() -> DevResult<()> {
     let cli = Cli::parse();
+    let paths = CatalogPaths::resolve(
+        cli.catalog_root,
+        cli.contracts_overlay,
+        cli.no_private_contracts,
+    )?;
     match cli.command {
         Commands::Inventory(args) => {
-            let catalog = load_workspace_catalog()?;
+            let catalog = load_workspace_catalog(&paths)?;
             let repos = inventory(&args.root, &catalog)?;
             let output = InventoryOutput {
                 schema_version: SCHEMA_VERSION,
@@ -693,7 +725,7 @@ pub fn run() -> DevResult<()> {
         }
         Commands::Standards(args) => match args.command {
             StandardsCommand::Audit(args) => {
-                let output = audit_command(&args)?;
+                let output = audit_command(&args, &paths)?;
                 if args.json {
                     print_json(&output)?;
                 } else {
@@ -706,7 +738,7 @@ pub fn run() -> DevResult<()> {
                 }
             }
             StandardsCommand::AdjudicationTemplate(args) => {
-                let output = adjudication_template_command(&args)?;
+                let output = adjudication_template_command(&args, &paths)?;
                 if args.json {
                     print_json(&output)?;
                 } else {
@@ -716,7 +748,7 @@ pub fn run() -> DevResult<()> {
                 }
             }
             StandardsCommand::Contracts(args) => {
-                let output = contracts_command(&args)?;
+                let output = contracts_command(&args, &paths)?;
                 if args.json {
                     print_json(&output)?;
                 } else {
@@ -724,7 +756,7 @@ pub fn run() -> DevResult<()> {
                 }
             }
             StandardsCommand::Packet(args) => {
-                let output = packet_command(&args)?;
+                let output = packet_command(&args, &paths)?;
                 if args.json {
                     print_json(&output)?;
                 } else {
@@ -732,7 +764,7 @@ pub fn run() -> DevResult<()> {
                 }
             }
             StandardsCommand::Plan(args) => {
-                let output = plan_command(&args)?;
+                let output = plan_command(&args, &paths)?;
                 if args.json {
                     print_json(&output)?;
                 } else {
@@ -740,7 +772,7 @@ pub fn run() -> DevResult<()> {
                 }
             }
             StandardsCommand::ProposeContract(args) => {
-                let output = propose_contract_command(&args)?;
+                let output = propose_contract_command(&args, &paths)?;
                 if args.json {
                     print_json(&output)?;
                 } else {
@@ -748,7 +780,7 @@ pub fn run() -> DevResult<()> {
                 }
             }
             StandardsCommand::Report(args) => {
-                let output = report_command(&args)?;
+                let output = report_command(&args, &paths)?;
                 if args.json {
                     print_json(&output)?;
                 } else {
@@ -758,7 +790,7 @@ pub fn run() -> DevResult<()> {
         },
         Commands::Repo(args) => match args.command {
             RepoCommand::Explain(args) => {
-                let catalog = load_workspace_catalog()?;
+                let catalog = load_workspace_catalog(&paths)?;
                 let repo = scan_repo(&args.repo, &catalog)?;
                 if args.json {
                     print_json(&repo)?;
@@ -771,12 +803,12 @@ pub fn run() -> DevResult<()> {
     Ok(())
 }
 
-fn audit_command(args: &AuditArgs) -> DevResult<AuditOutput> {
-    let catalog = load_workspace_catalog()?;
-    let laws = load_laws_catalog()?;
-    let archetypes = load_archetypes_catalog()?;
-    let contracts = load_contracts_catalog()?;
-    let adjudications = load_adjudications_catalog()?;
+fn audit_command(args: &AuditArgs, paths: &CatalogPaths) -> DevResult<AuditOutput> {
+    let catalog = load_workspace_catalog(paths)?;
+    let laws = load_laws_catalog(paths)?;
+    let archetypes = load_archetypes_catalog(paths)?;
+    let contracts = load_contracts_catalog(paths)?;
+    let adjudications = load_adjudications_catalog(paths)?;
     validate_laws_catalog(&laws)?;
     validate_archetypes_catalog(&archetypes)?;
     validate_contracts_catalog(&contracts, &archetypes)?;
@@ -797,6 +829,7 @@ fn audit_command(args: &AuditArgs) -> DevResult<AuditOutput> {
     let mut findings = audit_repos(&repos, Some(&contracts), Some(&archetypes))?;
     apply_adjudications(&mut findings, &adjudications);
     validate_findings_against_laws(&findings, &laws)?;
+    bind_standard_refs(&mut findings, &laws);
     Ok(AuditOutput {
         schema_version: SCHEMA_VERSION,
         root,
@@ -806,15 +839,31 @@ fn audit_command(args: &AuditArgs) -> DevResult<AuditOutput> {
     })
 }
 
-fn plan_command(args: &PlanArgs) -> DevResult<PlanOutput> {
+fn bind_standard_refs(findings: &mut [Finding], laws: &LawsCatalog) {
+    for finding in findings {
+        if let Some(law) = laws.laws.iter().find(|law| law.id == finding.law) {
+            finding.standard_refs = law.standard_refs.clone();
+            finding.standard_source = Some(format!(
+                "{}@{}",
+                laws.standards.repository, laws.standards.commit
+            ));
+            finding.law_maturity = Some(law.maturity.clone());
+        }
+    }
+}
+
+fn plan_command(args: &PlanArgs, paths: &CatalogPaths) -> DevResult<PlanOutput> {
     let risk = parse_risk(&args.risk)?;
-    let audit = audit_command(&AuditArgs {
-        root: args.root.clone(),
-        pilot: args.pilot.clone(),
-        all: args.all,
-        json: true,
-        fail_on: None,
-    })?;
+    let audit = audit_command(
+        &AuditArgs {
+            root: args.root.clone(),
+            pilot: args.pilot.clone(),
+            all: args.all,
+            json: true,
+            fail_on: None,
+        },
+        paths,
+    )?;
     let filtered: Vec<Finding> = audit
         .findings
         .into_iter()
@@ -831,15 +880,19 @@ fn plan_command(args: &PlanArgs) -> DevResult<PlanOutput> {
 
 fn adjudication_template_command(
     args: &AdjudicationTemplateArgs,
+    paths: &CatalogPaths,
 ) -> DevResult<AdjudicationTemplateOutput> {
     let risk = parse_risk(&args.risk)?;
-    let audit = audit_command(&AuditArgs {
-        root: args.root.clone(),
-        pilot: args.pilot.clone(),
-        all: args.all,
-        json: true,
-        fail_on: None,
-    })?;
+    let audit = audit_command(
+        &AuditArgs {
+            root: args.root.clone(),
+            pilot: args.pilot.clone(),
+            all: args.all,
+            json: true,
+            fail_on: None,
+        },
+        paths,
+    )?;
     let adjudications = build_adjudication_template(&audit.findings, &risk);
     Ok(AdjudicationTemplateOutput {
         schema_version: SCHEMA_VERSION,
@@ -868,9 +921,12 @@ fn build_adjudication_template(findings: &[Finding], risk: &[Severity]) -> Vec<A
         .collect()
 }
 
-fn propose_contract_command(args: &ProposeContractArgs) -> DevResult<RepoContractProposal> {
-    let catalog = load_workspace_catalog()?;
-    let contracts = load_contracts_catalog()?;
+fn propose_contract_command(
+    args: &ProposeContractArgs,
+    paths: &CatalogPaths,
+) -> DevResult<RepoContractProposal> {
+    let catalog = load_workspace_catalog(paths)?;
+    let contracts = load_contracts_catalog(paths)?;
     let repo = scan_repo(&args.repo, &catalog)?;
     Ok(build_contract_proposal(
         &repo,
@@ -878,10 +934,12 @@ fn propose_contract_command(args: &ProposeContractArgs) -> DevResult<RepoContrac
     ))
 }
 
-fn contracts_command(args: &ContractsArgs) -> DevResult<ContractsOutput> {
-    let catalog = load_workspace_catalog()?;
-    let archetypes = load_archetypes_catalog()?;
-    let contracts = load_contracts_catalog()?;
+fn contracts_command(args: &ContractsArgs, paths: &CatalogPaths) -> DevResult<ContractsOutput> {
+    let catalog = load_workspace_catalog(paths)?;
+    let laws = load_laws_catalog(paths)?;
+    validate_laws_catalog(&laws)?;
+    let archetypes = load_archetypes_catalog(paths)?;
+    let contracts = load_contracts_catalog(paths)?;
     validate_archetypes_catalog(&archetypes)?;
     validate_contracts_catalog(&contracts, &archetypes)?;
     let root = normalize_path(&args.root);
@@ -918,6 +976,7 @@ fn contracts_command(args: &ContractsArgs) -> DevResult<ContractsOutput> {
             .then_with(|| left.file.cmp(&right.file))
             .then_with(|| left.line.cmp(&right.line))
     });
+    bind_standard_refs(&mut findings, &laws);
     assign_finding_ids(&mut findings);
     Ok(ContractsOutput {
         schema_version: SCHEMA_VERSION,
@@ -928,16 +987,19 @@ fn contracts_command(args: &ContractsArgs) -> DevResult<ContractsOutput> {
     })
 }
 
-fn packet_command(args: &PacketArgs) -> DevResult<PacketOutput> {
+fn packet_command(args: &PacketArgs, paths: &CatalogPaths) -> DevResult<PacketOutput> {
     let risk = parse_risk(&args.risk)?;
-    let audit = audit_command(&AuditArgs {
-        root: args.root.clone(),
-        pilot: args.pilot.clone(),
-        all: args.all,
-        json: true,
-        fail_on: None,
-    })?;
-    let contracts_catalog = load_contracts_catalog()?;
+    let audit = audit_command(
+        &AuditArgs {
+            root: args.root.clone(),
+            pilot: args.pilot.clone(),
+            all: args.all,
+            json: true,
+            fail_on: None,
+        },
+        paths,
+    )?;
+    let contracts_catalog = load_contracts_catalog(paths)?;
     let contracts: Vec<RepoContractProposal> = audit
         .repos
         .iter()
@@ -990,14 +1052,17 @@ fn packet_command(args: &PacketArgs) -> DevResult<PacketOutput> {
     })
 }
 
-fn report_command(args: &ReportArgs) -> DevResult<ReportOutput> {
-    let audit = audit_command(&AuditArgs {
-        root: args.root.clone(),
-        pilot: args.pilot.clone(),
-        all: args.all,
-        json: true,
-        fail_on: None,
-    })?;
+fn report_command(args: &ReportArgs, paths: &CatalogPaths) -> DevResult<ReportOutput> {
+    let audit = audit_command(
+        &AuditArgs {
+            root: args.root.clone(),
+            pilot: args.pilot.clone(),
+            all: args.all,
+            json: true,
+            fail_on: None,
+        },
+        paths,
+    )?;
     let actionable: Vec<Finding> = audit
         .findings
         .iter()
@@ -1051,149 +1116,6 @@ fn parse_risk(value: &str) -> DevResult<Vec<Severity>> {
         .filter(|part| !part.trim().is_empty())
         .map(|part| part.parse::<Severity>().map_err(|err| err.into()))
         .collect()
-}
-
-fn load_workspace_catalog() -> DevResult<WorkspaceCatalog> {
-    let path = Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("catalog/workspace.toml");
-    let body = fs::read_to_string(path)?;
-    Ok(toml::from_str(&body)?)
-}
-
-fn load_laws_catalog() -> DevResult<LawsCatalog> {
-    let path = Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("catalog/laws.toml");
-    let body = fs::read_to_string(path)?;
-    Ok(toml::from_str(&body)?)
-}
-
-fn load_archetypes_catalog() -> DevResult<ArchetypesCatalog> {
-    let path = Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("catalog/archetypes.toml");
-    let body = fs::read_to_string(path)?;
-    Ok(toml::from_str(&body)?)
-}
-
-fn load_contracts_catalog() -> DevResult<ContractsCatalog> {
-    let manifest_root = Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let mut catalog = ContractsCatalog::default();
-    load_contracts_dir(
-        &manifest_root.join("catalog/contracts"),
-        &mut catalog,
-        false,
-    )?;
-    load_contracts_dir(
-        &manifest_root.join("catalog/local/contracts"),
-        &mut catalog,
-        true,
-    )?;
-    Ok(catalog)
-}
-
-fn load_contracts_dir(
-    root: &Utf8Path,
-    catalog: &mut ContractsCatalog,
-    allow_override: bool,
-) -> DevResult<()> {
-    if !root.is_dir() {
-        return Ok(());
-    }
-    let mut entries = Vec::new();
-    for entry in fs::read_dir(root)? {
-        let entry = entry?;
-        let path = Utf8PathBuf::from_path_buf(entry.path())
-            .map_err(|path| format!("non-utf8 contract path: {}", path.display()))?;
-        entries.push(path);
-    }
-    entries.sort();
-    for path in entries {
-        if !path.is_file() {
-            continue;
-        }
-        if path.extension() != Some("toml") {
-            continue;
-        }
-        let body = fs::read_to_string(&path)?;
-        let lines = toml_line_map(&body);
-        let contract: RepoContract = toml::from_str(&body)?;
-        if !allow_override && catalog.contracts.contains_key(&contract.repo) {
-            return Err(format!("duplicate contract for repo {}", contract.repo).into());
-        }
-        catalog.contracts.insert(
-            contract.repo.clone(),
-            SourcedRepoContract {
-                contract,
-                path,
-                lines,
-            },
-        );
-    }
-    Ok(())
-}
-
-fn load_adjudications_catalog() -> DevResult<AdjudicationsCatalog> {
-    let path = Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("catalog/adjudications.toml");
-    if !path.is_file() {
-        return Ok(AdjudicationsCatalog::default());
-    }
-    let body = fs::read_to_string(path)?;
-    Ok(toml::from_str(&body)?)
-}
-
-fn validate_laws_catalog(catalog: &LawsCatalog) -> DevResult<()> {
-    if catalog.schema_version != SCHEMA_VERSION {
-        return Err(format!(
-            "catalog/laws.toml schema_version {} does not match {SCHEMA_VERSION}",
-            catalog.schema_version
-        )
-        .into());
-    }
-    let mut ids = BTreeSet::new();
-    for law in &catalog.laws {
-        if law.id.trim().is_empty()
-            || law.title.trim().is_empty()
-            || law.description.trim().is_empty()
-        {
-            return Err("catalog/laws.toml contains an incomplete law definition".into());
-        }
-        if matches!(law.maturity, LawMaturity::Retired) && V0_LAWS.contains(&law.id.as_str()) {
-            return Err(format!("catalog/laws.toml retires active V0 law {}", law.id).into());
-        }
-        if !ids.insert(law.id.as_str()) {
-            return Err(format!("catalog/laws.toml repeats law id {}", law.id).into());
-        }
-    }
-    for law in V0_LAWS {
-        if !ids.contains(law) {
-            return Err(format!("catalog/laws.toml is missing V0 law {law}").into());
-        }
-    }
-    Ok(())
-}
-
-fn validate_archetypes_catalog(catalog: &ArchetypesCatalog) -> DevResult<()> {
-    if catalog.schema_version != SCHEMA_VERSION {
-        return Err(format!(
-            "catalog/archetypes.toml schema_version {} does not match {SCHEMA_VERSION}",
-            catalog.schema_version
-        )
-        .into());
-    }
-    let mut ids = BTreeSet::new();
-    for archetype in &catalog.archetypes {
-        if archetype.id.trim().is_empty() || archetype.title.trim().is_empty() {
-            return Err("catalog/archetypes.toml contains an incomplete archetype".into());
-        }
-        if archetype.requires_cloudflare_posture && archetype.allowed_cloudflare_postures.is_empty()
-        {
-            return Err(format!(
-                "archetype {} requires Cloudflare posture but has no allowed postures",
-                archetype.id
-            )
-            .into());
-        }
-        if !ids.insert(archetype.id.as_str()) {
-            return Err(format!("catalog/archetypes.toml repeats {}", archetype.id).into());
-        }
-    }
-    Ok(())
 }
 
 fn validate_contracts_catalog(
@@ -1866,7 +1788,6 @@ fn audit_repos(
         }
         audit_cloudflare(repo, &mut findings)?;
         audit_tokens(repo, &mut findings)?;
-        audit_doctrine_quartet(repo, &mut findings)?;
         audit_command_verification(repo, &mut findings)?;
         audit_release(repo, &mut findings)?;
         audit_artifacts(repo, &mut findings)?;
@@ -1916,7 +1837,6 @@ fn scanner_requirement_id(finding: &Finding) -> &'static str {
         "cloudflare-governance" => "cloudflare-mutation-lane-classified",
         "cloudflare-token-law" => "cloudflare-parent-token-contained",
         "secret-file-permissions" => "secret-file-permissions-private",
-        "doctrine-quartet" => "contract-quartet-present",
         "verification-contract" => "canonical-verification-command-present",
         "script-ownership" => "script-state-classified",
         "release-proof" => "release-lane-proof-bound",
@@ -1934,9 +1854,6 @@ fn scanner_expected(finding: &Finding) -> &'static str {
             "Parent Cloudflare tokens remain in allowlisted control-plane or rotation contexts"
         }
         "secret-file-permissions" => "Secret-bearing env files are not group/world readable",
-        "doctrine-quartet" => {
-            "Every real repo carries the NORTH_STAR/ANCHOR/AGENTS/CLAUDE contract quartet"
-        }
         "verification-contract" => "Active repos declare a canonical verification surface",
         "script-ownership" => {
             "Check/verify scripts have a gated/recovery/transitive/retired classification"
@@ -2040,14 +1957,14 @@ fn audit_contract(
             findings.push(Finding::contract_gap(
                 repo,
                 None,
-                "active-repo-contract-present",
-                Severity::P1,
+                "catalog-enrollment-unverified",
+                Severity::P3,
                 repo_anchor(repo),
                 None,
-                "Active repo has no devctl contract",
+                "Observation gap: repository has no selected devctl catalog contract",
                 "contract=missing",
-                "Create an operator-owned contract under devctl/catalog/contracts/<repo>.toml.",
-                "catalog/contracts/<repo>.toml exists",
+                "Review existing repository intent; enroll an operator contract only when useful.",
+                "Repository intent is resolved from its adopted local owners",
                 "no contract loaded",
             ));
         }
@@ -2476,45 +2393,6 @@ fn audit_tokens(repo: &RepoRecord, findings: &mut Vec<Finding>) -> DevResult<()>
     Ok(())
 }
 
-fn audit_doctrine_quartet(repo: &RepoRecord, findings: &mut Vec<Finding>) -> DevResult<()> {
-    if matches!(repo.status, RepoStatus::Template | RepoStatus::Unknown) {
-        return Ok(());
-    }
-    let quartet: [(&str, &Option<Utf8PathBuf>); 4] = [
-        ("NORTH_STAR.md", &repo.docs.north_star),
-        ("ANCHOR.md", &repo.docs.anchor),
-        ("AGENTS.md", &repo.docs.agents),
-        ("CLAUDE.md", &repo.docs.claude),
-    ];
-    for (name, present) in quartet {
-        if present.is_some() {
-            continue;
-        }
-        let message = format!("Repo is missing contract quartet file {name}");
-        let evidence = format!(
-            "{name} not found at repo root; workspace doctrine expects the full \
-             NORTH_STAR/ANCHOR/AGENTS/CLAUDE quartet"
-        );
-        let recommendation = format!(
-            "Author {name} from live repo truth so workspace standards sprinkle down \
-             and stay enforceable."
-        );
-        findings.push(Finding::new(
-            "doctrine-quartet",
-            Severity::P2,
-            repo,
-            repo_anchor(repo),
-            None,
-            &message,
-            &evidence,
-            &recommendation,
-            Confidence::High,
-            "doctrine-quartet",
-        ));
-    }
-    Ok(())
-}
-
 fn audit_command_verification(repo: &RepoRecord, findings: &mut Vec<Finding>) -> DevResult<()> {
     if matches!(
         repo.status,
@@ -2798,6 +2676,9 @@ impl Finding {
             contract_source: None,
             requirement_id: None,
             law: law.to_string(),
+            standard_refs: Vec::new(),
+            standard_source: None,
+            law_maturity: None,
             severity,
             repo: repo.name.clone(),
             file,
@@ -2859,6 +2740,9 @@ impl Finding {
             contract_source: Some(contract_source),
             requirement_id: Some(requirement_id.to_string()),
             law: CONTRACT_LAW.to_string(),
+            standard_refs: Vec::new(),
+            standard_source: None,
+            law_maturity: None,
             severity,
             repo: repo.name.clone(),
             file,
@@ -3017,6 +2901,9 @@ fn sorted_unique(values: impl Iterator<Item = String>) -> Vec<String> {
 }
 
 fn finding_is_actionable(finding: &Finding) -> bool {
+    if finding.requirement_id.as_deref() == Some("catalog-enrollment-unverified") {
+        return false;
+    }
     !matches!(
         finding.adjudication.as_ref().map(|entry| &entry.status),
         Some(AdjudicationStatus::AcceptedException)
@@ -3039,9 +2926,7 @@ fn summarize_adjudications(findings: &[Finding]) -> BTreeMap<String, usize> {
 }
 
 fn resolve_report_root(out: Option<&Utf8PathBuf>) -> DevResult<Utf8PathBuf> {
-    let root = out
-        .cloned()
-        .unwrap_or_else(|| Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("reports"));
+    let root = out.cloned().unwrap_or_else(|| Utf8PathBuf::from("reports"));
     if root.is_absolute() {
         Ok(root)
     } else {
@@ -3476,36 +3361,41 @@ mod tests {
     }
 
     #[test]
-    fn missing_quartet_files_produce_doctrine_findings() {
+    fn missing_optional_document_names_are_not_compliance_failures() {
         let fixture = TestRepo::new("doctrine-repo");
         fixture.write("AGENTS.md", "active repo\n");
         fixture.write("Cargo.toml", "[package]\nname = \"doctrine-repo\"\n");
-        let messages: Vec<String> = fixture
-            .audit()
-            .into_iter()
-            .filter(|finding| finding.law == "doctrine-quartet")
-            .map(|finding| finding.message)
-            .collect();
-        // AGENTS.md is present, so only the other three quartet files are findings.
-        assert!(messages.iter().any(|m| m.contains("NORTH_STAR.md")));
-        assert!(messages.iter().any(|m| m.contains("ANCHOR.md")));
-        assert!(messages.iter().any(|m| m.contains("CLAUDE.md")));
-        assert!(!messages.iter().any(|m| m.contains("AGENTS.md")));
-    }
-
-    #[test]
-    fn complete_quartet_produces_no_doctrine_finding() {
-        let fixture = TestRepo::new("complete-repo");
-        fixture.write("NORTH_STAR.md", "north\n");
-        fixture.write("ANCHOR.md", "anchor\n");
-        fixture.write("AGENTS.md", "agents\n");
-        fixture.write("CLAUDE.md", "claude\n");
-        fixture.write("Cargo.toml", "[package]\nname = \"complete-repo\"\n");
         assert!(
             !fixture
                 .audit()
                 .iter()
                 .any(|finding| finding.law == "doctrine-quartet")
+        );
+    }
+
+    #[test]
+    fn retired_quartet_keeps_its_source_and_historical_reason() {
+        let paths = CatalogPaths::resolve(
+            Some(Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("catalog")),
+            None,
+            true,
+        )
+        .unwrap();
+        let laws = load_laws_catalog(&paths).unwrap();
+        validate_laws_catalog(&laws).unwrap();
+        let retired = laws
+            .laws
+            .iter()
+            .find(|law| law.id == "doctrine-quartet")
+            .unwrap();
+        assert!(matches!(retired.maturity, LawMaturity::Retired));
+        assert_eq!(retired.standard_refs, ["STD:DOC.CONTEXT"]);
+        assert!(
+            retired
+                .retirement_reason
+                .as_ref()
+                .unwrap()
+                .contains("historical")
         );
     }
 
@@ -3526,7 +3416,23 @@ posture = "none"
 evidence_dirs = []
 "#,
         );
-        let contracts = load_contracts_catalog().expect("contracts load");
+        let paths = CatalogPaths::resolve(
+            Some(
+                _fixture
+                    .path
+                    .parent()
+                    .unwrap()
+                    .parent()
+                    .unwrap()
+                    .parent()
+                    .unwrap()
+                    .to_owned(),
+            ),
+            None,
+            false,
+        )
+        .unwrap();
+        let contracts = load_contracts_catalog(&paths).expect("contracts load");
         assert!(contracts.contracts.contains_key("tdd-private-overlay"));
     }
 
@@ -3581,7 +3487,7 @@ evidence_dirs = []
     }
 
     #[test]
-    fn plan_all_includes_contract_findings_outside_pilot() {
+    fn missing_enrollment_is_not_turned_into_mandatory_catalog_work() {
         let workspace = TestWorkspace::new();
         let repo = workspace.repo("contractless-plan-repo");
         repo.write("NORTH_STAR.md", "north\n");
@@ -3593,18 +3499,45 @@ evidence_dirs = []
             "[package]\nname = \"contractless-plan-repo\"\n",
         );
 
-        let output = plan_command(&PlanArgs {
-            root: workspace.root.clone(),
-            pilot: None,
-            all: true,
-            risk: "P1".to_string(),
-            json: true,
-        })
+        let paths = CatalogPaths::resolve(
+            Some(Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("catalog")),
+            None,
+            true,
+        )
+        .unwrap();
+        let audit = audit_command(
+            &AuditArgs {
+                root: workspace.root.clone(),
+                pilot: None,
+                all: true,
+                json: true,
+                fail_on: None,
+            },
+            &paths,
+        )
+        .expect("audit succeeds");
+        assert!(audit.findings.iter().any(|finding| {
+            finding.requirement_id.as_deref() == Some("catalog-enrollment-unverified")
+                && finding.severity == Severity::P3
+        }));
+        let output = plan_command(
+            &PlanArgs {
+                root: workspace.root.clone(),
+                pilot: None,
+                all: true,
+                risk: "P0,P1,P2,P3".to_string(),
+                json: true,
+            },
+            &paths,
+        )
         .expect("plan succeeds");
 
-        assert!(output.tranches.iter().any(|tranche| {
-            tranche.id == "contractless-plan-repo:repo-contract:active-repo-contract-present"
-        }));
+        assert!(
+            !output
+                .tranches
+                .iter()
+                .any(|tranche| tranche.id.contains("catalog-enrollment"))
+        );
     }
 
     #[test]
@@ -4068,7 +4001,8 @@ evidence_dirs = []
 
     impl LocalCatalogFixture {
         fn contract(name: &str, body: &str) -> Self {
-            let path = Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            let path = TestWorkspace::new()
+                .root
                 .join("catalog/local/contracts")
                 .join(format!("{name}.toml"));
             if let Some(parent) = path.parent() {
