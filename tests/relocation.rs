@@ -1,21 +1,26 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 struct Fixture(PathBuf);
 
+// Clock resolution can repeat across parallel tests; the counter keeps fixtures disjoint.
+static NEXT_FIXTURE: AtomicUsize = AtomicUsize::new(0);
+
 impl Fixture {
     fn new() -> Self {
         let root = std::env::temp_dir().join(format!(
-            "devctl-relocation-{}-{}",
+            "devctl-relocation-{}-{}-{}",
             std::process::id(),
+            NEXT_FIXTURE.fetch_add(1, Ordering::Relaxed),
             SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
                 .as_nanos()
         ));
-        fs::create_dir_all(&root).unwrap();
+        fs::create_dir(&root).unwrap();
         Self(root)
     }
 
@@ -136,8 +141,80 @@ fn relocated_binary_uses_adjacent_catalog_and_reports_missing_inputs() {
     assert!(String::from_utf8_lossy(&missing.stderr).contains("catalog"));
 }
 
+#[cfg(unix)]
 #[test]
-fn private_overlay_requires_selection_and_errors_do_not_expose_values() {
+fn symlinked_launcher_uses_catalog_beside_the_real_executable() {
+    let fixture = Fixture::new();
+    fixture.catalog();
+    let forest = fixture.forest();
+    fs::copy(env!("CARGO_BIN_EXE_devctl"), fixture.0.join("moved/devctl")).unwrap();
+    let bin = fixture.0.join("bin");
+    fs::create_dir(&bin).unwrap();
+    std::os::unix::fs::symlink("../moved/devctl", bin.join("devctl")).unwrap();
+    let output = Command::new(bin.join("devctl"))
+        .current_dir(&fixture.0)
+        .args(["inventory", forest.to_str().unwrap(), "--json"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(!bin.join("catalog").exists());
+}
+
+#[test]
+fn report_commands_require_out_and_never_default_into_a_target_repo() {
+    let fixture = Fixture::new();
+    let catalog = fixture.catalog();
+    let forest = fixture.forest();
+    let target_repo = forest.join("example");
+    for command in ["report", "packet"] {
+        let output = Command::new(env!("CARGO_BIN_EXE_devctl"))
+            .current_dir(&target_repo)
+            .args([
+                "--catalog-root",
+                catalog.to_str().unwrap(),
+                "--no-private-contracts",
+                "standards",
+                command,
+                forest.to_str().unwrap(),
+                "--all",
+            ])
+            .output()
+            .unwrap();
+        assert!(!output.status.success(), "{command} ran without --out");
+        assert!(String::from_utf8_lossy(&output.stderr).contains("--out"));
+    }
+    assert!(!target_repo.join("reports").exists());
+    let out = fixture.0.join("operator-reports");
+    let output = Command::new(env!("CARGO_BIN_EXE_devctl"))
+        .current_dir(&target_repo)
+        .args([
+            "--catalog-root",
+            catalog.to_str().unwrap(),
+            "--no-private-contracts",
+            "standards",
+            "report",
+            forest.to_str().unwrap(),
+            "--all",
+            "--out",
+            out.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(out.join("audits").is_dir());
+    assert!(!target_repo.join("reports").exists());
+}
+
+#[test]
+fn explicit_overlay_parse_errors_omit_source_values() {
     let fixture = Fixture::new();
     let catalog = fixture.catalog();
     let forest = fixture.forest();

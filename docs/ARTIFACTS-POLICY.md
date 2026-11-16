@@ -7,7 +7,7 @@ artifacts, not source policy.
 
 | Path | Classification | Git posture |
 | --- | --- | --- |
-| `reports/` | Generated standards reports and operator review packets. | Ignored. Regenerate from `devctl standards report` or `devctl standards packet`. |
+| `reports/` | Generated standards reports and operator review packets. | Ignored. Regenerate with `devctl standards report` or `devctl standards packet` and `--out reports` from this checkout. |
 | `var/` | Local runtime state, cargo-gate logs, and transient command receipts. | Ignored. Machine-local evidence only. |
 | `target/` | Rust build and documentation output. | Ignored. Regenerate with Cargo. |
 

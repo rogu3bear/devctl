@@ -144,8 +144,9 @@ struct PacketArgs {
     all: bool,
     #[arg(long, default_value = "P0,P1")]
     risk: String,
+    /// Required output directory; there is no default, so packets never land in an audited repo
     #[arg(long)]
-    out: Option<Utf8PathBuf>,
+    out: Utf8PathBuf,
     #[arg(long)]
     json: bool,
 }
@@ -157,8 +158,9 @@ struct ReportArgs {
     pilot: Option<Pilot>,
     #[arg(long)]
     all: bool,
+    /// Required output directory; there is no default, so reports never land in an audited repo
     #[arg(long)]
-    out: Option<Utf8PathBuf>,
+    out: Utf8PathBuf,
     #[arg(long)]
     json: bool,
 }
@@ -1015,7 +1017,7 @@ fn packet_command(args: &PacketArgs, paths: &CatalogPaths) -> DevResult<PacketOu
     let tranches = build_tranches(&actionable);
     let next_actions = derive_next_actions(&contracts, &adjudication_template, &tranches);
     let generated_at_epoch_seconds = unix_timestamp()?;
-    let out_root = resolve_report_root(args.out.as_ref())?;
+    let out_root = resolve_report_root(&args.out)?;
     let packet_dir = out_root.join("packets");
     fs::create_dir_all(&packet_dir)?;
     let slug = audit.scope.replace(':', "-");
@@ -1071,7 +1073,7 @@ fn report_command(args: &ReportArgs, paths: &CatalogPaths) -> DevResult<ReportOu
         .collect();
     let tranches = build_tranches(&actionable);
     let generated_at_epoch_seconds = unix_timestamp()?;
-    let out_root = resolve_report_root(args.out.as_ref())?;
+    let out_root = resolve_report_root(&args.out)?;
     let audit_dir = out_root.join("audits");
     fs::create_dir_all(&audit_dir)?;
     let slug = audit.scope.replace(':', "-");
@@ -2925,8 +2927,8 @@ fn summarize_adjudications(findings: &[Finding]) -> BTreeMap<String, usize> {
     summary
 }
 
-fn resolve_report_root(out: Option<&Utf8PathBuf>) -> DevResult<Utf8PathBuf> {
-    let root = out.cloned().unwrap_or_else(|| Utf8PathBuf::from("reports"));
+fn resolve_report_root(out: &Utf8Path) -> DevResult<Utf8PathBuf> {
+    let root = out.to_owned();
     if root.is_absolute() {
         Ok(root)
     } else {
@@ -3487,7 +3489,7 @@ evidence_dirs = []
     }
 
     #[test]
-    fn missing_enrollment_is_not_turned_into_mandatory_catalog_work() {
+    fn plan_all_covers_repos_outside_pilot_without_enrollment_work() {
         let workspace = TestWorkspace::new();
         let repo = workspace.repo("contractless-plan-repo");
         repo.write("NORTH_STAR.md", "north\n");
@@ -3505,6 +3507,8 @@ evidence_dirs = []
             true,
         )
         .unwrap();
+        let pilot = load_workspace_catalog(&paths).unwrap().pilot_three_tier;
+        assert!(!pilot.iter().any(|name| name == "contractless-plan-repo"));
         let audit = audit_command(
             &AuditArgs {
                 root: workspace.root.clone(),
@@ -3532,6 +3536,12 @@ evidence_dirs = []
         )
         .expect("plan succeeds");
 
+        // Regression guard for full-forest scope: --all must plan a repo outside the pilot.
+        assert!(output.tranches.iter().any(|tranche| {
+            tranche.id
+                == "contractless-plan-repo:command-verification:canonical-verification-command-present"
+                && tranche.repos == ["contractless-plan-repo"]
+        }));
         assert!(
             !output
                 .tranches

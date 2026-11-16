@@ -20,22 +20,24 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 cargo doc --workspace --no-deps
 
-# Build / run the CLI
+# Build / run the CLI from the checkout root; source runs select the catalog
 cargo build
-cargo run -- inventory ~/dev
-cargo run -- standards audit ~/dev --all
-cargo run -- standards plan ~/dev --all --risk P0,P1
+cargo run -- --catalog-root ./catalog inventory ~/dev
+cargo run -- --catalog-root ./catalog standards audit ~/dev --all
+cargo run -- --catalog-root ./catalog standards plan ~/dev --all --risk P0,P1
 
-# Repeatable local standards lane
-cargo run -- standards audit ~/dev --all
-cargo run -- standards plan ~/dev --all --risk P0,P1
-cargo run -- standards packet ~/dev --all --risk P0,P1
+# Repeatable local standards lane; packet/report require --out (no default)
+cargo run -- --catalog-root ./catalog standards audit ~/dev --all
+cargo run -- --catalog-root ./catalog standards plan ~/dev --all --risk P0,P1
+cargo run -- --catalog-root ./catalog standards packet ~/dev --all --risk P0,P1 --out ./reports
 ```
 
 ## Architecture
 
-- `src/main.rs` is a thin binary entrypoint; `src/lib.rs` holds the whole CLI:
-  the clap command surface, scanners, catalog model, report rendering, and tests.
+- `src/main.rs` is a thin binary entrypoint; `src/lib.rs` holds the clap
+  command surface, scanners, catalog model, report rendering, and unit tests;
+  `src/catalog.rs` owns catalog paths, loading, and catalog validation;
+  `tests/relocation.rs` exercises the built binary with relocated catalogs.
 - Command families: `inventory`, `standards`, `repo`. The `standards` family
   owns `audit`, `contracts`, `plan`, `packet`, `report`,
   `propose-contract`, and `adjudication-template`.

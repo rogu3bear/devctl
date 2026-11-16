@@ -1,8 +1,8 @@
 //! Explicit, relocatable catalog selection. Never writes catalogs or overlays.
 use crate::{
-    AdjudicationsCatalog, ArchetypesCatalog, ContractsCatalog, DevResult, LawMaturity, LawsCatalog,
-    RepoContract, SCHEMA_VERSION, SourcedRepoContract, Utf8Path, Utf8PathBuf, V0_LAWS,
-    WorkspaceCatalog, toml_line_map,
+    AdjudicationsCatalog, ArchetypesCatalog, CONTRACT_LAW, ContractsCatalog, DevResult,
+    LawMaturity, LawsCatalog, RepoContract, SCHEMA_VERSION, SourcedRepoContract, Utf8Path,
+    Utf8PathBuf, V0_LAWS, WorkspaceCatalog, toml_line_map,
 };
 use std::{collections::BTreeSet, fs};
 
@@ -19,7 +19,8 @@ impl CatalogPaths {
     ) -> DevResult<Self> {
         let root = match root {
             Some(root) => root,
-            None => Utf8PathBuf::from_path_buf(std::env::current_exe()?)
+            // Resolve launcher symlinks so the catalog is found beside the real executable.
+            None => Utf8PathBuf::from_path_buf(std::env::current_exe()?.canonicalize()?)
                 .map_err(|_| "Executable path is not UTF-8")?
                 .parent()
                 .ok_or("Executable has no parent")?
@@ -153,8 +154,8 @@ pub(super) fn validate_laws_catalog(catalog: &LawsCatalog) -> DevResult<()> {
         {
             return Err("catalog/laws.toml contains an incomplete law definition".into());
         }
-        if matches!(law.maturity, LawMaturity::Retired) && V0_LAWS.contains(&law.id.as_str()) {
-            return Err(format!("catalog/laws.toml retires active V0 law {}", law.id).into());
+        if matches!(law.maturity, LawMaturity::Retired) && active_laws().any(|id| id == law.id) {
+            return Err(format!("catalog/laws.toml retires active law {}", law.id).into());
         }
         if law.standard_refs.is_empty()
             || law
@@ -176,12 +177,17 @@ pub(super) fn validate_laws_catalog(catalog: &LawsCatalog) -> DevResult<()> {
             return Err(format!("catalog/laws.toml repeats law id {}", law.id).into());
         }
     }
-    for law in V0_LAWS {
+    for law in active_laws() {
         if !ids.contains(law) {
-            return Err(format!("catalog/laws.toml is missing V0 law {law}").into());
+            return Err(format!("catalog/laws.toml is missing active law {law}").into());
         }
     }
     Ok(())
+}
+
+/// Laws with live scanners or contract checks; catalog edits may not retire or drop them.
+fn active_laws() -> impl Iterator<Item = &'static str> {
+    V0_LAWS.into_iter().chain([CONTRACT_LAW])
 }
 
 pub(super) fn validate_archetypes_catalog(catalog: &ArchetypesCatalog) -> DevResult<()> {
@@ -210,4 +216,47 @@ pub(super) fn validate_archetypes_catalog(catalog: &ArchetypesCatalog) -> DevRes
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn repo_laws() -> LawsCatalog {
+        let root = Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("catalog");
+        let paths = CatalogPaths::resolve(Some(root), None, true).unwrap();
+        let laws = load_laws_catalog(&paths).unwrap();
+        validate_laws_catalog(&laws).unwrap();
+        laws
+    }
+
+    fn retire(laws: &mut LawsCatalog, id: &str) {
+        let law = laws.laws.iter_mut().find(|law| law.id == id).unwrap();
+        law.maturity = LawMaturity::Retired;
+        law.retirement_reason = Some("synthetic catalog edit".to_string());
+    }
+
+    #[test]
+    fn catalog_edits_cannot_retire_active_laws() {
+        for id in [V0_LAWS[0], CONTRACT_LAW] {
+            let mut laws = repo_laws();
+            retire(&mut laws, id);
+            let error = validate_laws_catalog(&laws).unwrap_err().to_string();
+            assert!(
+                error.contains(&format!("retires active law {id}")),
+                "{error}"
+            );
+        }
+    }
+
+    #[test]
+    fn catalog_edits_cannot_drop_the_contract_law() {
+        let mut laws = repo_laws();
+        laws.laws.retain(|law| law.id != CONTRACT_LAW);
+        let error = validate_laws_catalog(&laws).unwrap_err().to_string();
+        assert!(
+            error.contains("missing active law repo-contract"),
+            "{error}"
+        );
+    }
 }

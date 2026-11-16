@@ -36,8 +36,13 @@ The former `active-repo-contract-present` P1 repair obligation is replaced by
 the distinct `catalog-enrollment-unverified` P3 observation, excluded from repair
 tranches. Old adjudications are not silently applied to this different claim.
 Enrolled contracts still validate typed commands, Cloudflare posture, release
-evidence and artifacts. Active checks cannot be silently retired by catalog edits.
+evidence and artifacts. Validation rejects a catalog edit that retires or drops
+an active law: the five scanner laws or `repo-contract`.
 
-Private overlays remain ignored, operator-owned inputs. Selected catalog-local
-or explicit overlays can be disabled completely. Packaging never copies them.
-Schema errors omit source values, and audits never edit target repositories.
+Private overlays remain ignored, operator-owned inputs.
+`--no-private-contracts` disables the catalog-local overlay; an explicit
+`--contracts-overlay` loads only when passed, and the two flags conflict. devctl
+has no packaging command; packagers decide what ships. TOML parse errors omit source values. Semantic validation errors and
+findings can name a loaded contract's fields, identifiers and file path,
+including from an overlay. Audits never edit target repositories, and
+`report`/`packet` write only under their required `--out` directory.
